@@ -6,22 +6,22 @@ const cors = require("cors");
 
 const { db } = require("./firebase");
 
+const registrationRouter = require("./registration");
+
 const {
   ENTRY_FEE,
   TOTAL_GROUPS,
-  PRIZE_SPLIT,
-  createGroups,
-  createGroupSchedule,
-  createPairings,
-  calculatePrizes
+  PRIZE_SPLIT
 } = require("./tournament");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+// Registration routes
+app.use("/api/tournament", registrationRouter);
 
 // Server status
 app.get("/", (req, res) => {
@@ -32,7 +32,8 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     status: "online",
-    server: "Bingo Tournament"
+    server: "Bingo Tournament",
+    time: new Date().toISOString()
   });
 });
 
@@ -45,6 +46,28 @@ app.get("/api/tournament/settings", (req, res) => {
   });
 });
 
+// Firebase connection check
+app.get("/api/firebase", async (req, res) => {
+  try {
+    await db.ref(".info/connected").once("value");
+
+    res.json({
+      status: "connected",
+      database: "Firebase Realtime Database"
+    });
+  } catch (error) {
+    console.error("Firebase error:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Firebase connection failed"
+    });
+  }
+});
+
+// Start server
 app.listen(PORT, () => {
-  console.log(`Bingo Tournament running on port ${PORT}`);
+  console.log(
+    `Bingo Tournament Server running on port ${PORT}`
+  );
 });
