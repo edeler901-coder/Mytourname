@@ -1,0 +1,105 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#160d2b">
+  <title>Bingo Champions</title>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="app">
+
+    <header class="header">
+      <div class="logo">🏆</div>
+      <div>
+        <h1>BINGO CHAMPIONS</h1>
+        <p>THE ULTIMATE TOURNAMENT</p>
+      </div>
+      <div class="live"><span></span> LIVE</div>
+    </header>
+
+    <section class="welcome">
+      <p class="small-title">WELCOME CHAMPION</p>
+      <h2>Are You Ready<br>To <span>Win Big?</span></h2>
+      <p class="description">
+        Enter the arena. Compete against players.
+        Become the Bingo Champion.
+      </p>
+    </section>
+
+    <section class="wallet">
+      <div>
+        <p>YOUR WALLET BALANCE</p>
+        <h2><span id="balance">0</span> <small>BR</small></h2>
+      </div>
+      <div class="wallet-icon">💰</div>
+    </section>
+
+    <section class="tournament-card">
+      <div class="tournament-top">
+        <span class="tag">🏆 MAIN TOURNAMENT</span>
+        <span class="status">UPCOMING</span>
+      </div>
+
+      <h2>BINGO CHAMPIONSHIP</h2>
+      <p class="entry-label">ENTRY FEE</p>
+      <h1>200 <small>BR</small></h1>
+
+      <div class="prizes">
+        <div>
+          <strong>50%</strong>
+          <span>1ST PLACE</span>
+        </div>
+        <div>
+          <strong>30%</strong>
+          <span>2ND PLACE</span>
+        </div>
+        <div>
+          <strong>10%</strong>
+          <span>3RD PLACE</span>
+        </div>
+      </div>
+
+      <button id="registerBtn" onclick="registerTournament()">
+        REGISTER NOW
+      </button>
+
+      <p class="notice">
+        Registration closes at midnight.
+      </p>
+    </section>
+
+    <section class="stats">
+      <div>
+        <strong id="players">0</strong>
+        <span>REGISTERED PLAYERS</span>
+      </div>
+      <div>
+        <strong>32</strong>
+        <span>GROUPS</span>
+      </div>
+      <div>
+        <strong>200 BR</strong>
+        <span>ENTRY FEE</span>
+      </div>
+    </section>
+
+    <nav class="bottom-nav">
+      <button class="active">🏠<span>HOME</span></button>
+      <button>🏆<span>TOURNAMENT</span></button>
+      <button>👤<span>PROFILE</span></button>
+      <button>ℹ️<span>INFO</span></button>
+    </nav>
+
+  </div>
+
+  <script src="app.js"></script>
+
+</body>
+</html>
