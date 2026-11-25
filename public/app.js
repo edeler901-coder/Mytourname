@@ -185,3 +185,61 @@ navButtons.forEach(button => {
     showTab(button.dataset.tab);
   });
 });
+// Load player's tournament group assignment
+async function loadAssignment() {
+  if (!tg || !tg.initData) return;
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/player/assignment`,
+      {
+        headers: {
+          "X-Telegram-Init-Data": tg.initData
+        }
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Assignment unavailable.");
+    }
+
+    let section = document.getElementById("assignmentInfo");
+
+    if (!section) {
+      section = document.createElement("section");
+      section.id = "assignmentInfo";
+      section.className = "tournament-card";
+      document.querySelector(".app").appendChild(section);
+    }
+
+    if (!result.assigned) {
+      section.innerHTML = `
+        <h2>YOUR GROUP</h2>
+        <p>Group assignments will appear after registration closes.</p>
+      `;
+      return;
+    }
+
+    const assignment = result.assignment;
+
+    const time = new Date(assignment.scheduledAt)
+      .toLocaleTimeString("en-GB", {
+        timeZone: "Africa/Addis_Ababa",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+    section.innerHTML = `
+      <h2>YOUR GROUP: ${assignment.groupNumber}</h2>
+      <p>Match time: ${time}</p>
+      <p>Status: ${assignment.status}</p>
+    `;
+
+  } catch (error) {
+    console.error("Assignment error:", error);
+  }
+}
+
+loadAssignment();
