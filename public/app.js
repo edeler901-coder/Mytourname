@@ -7,11 +7,19 @@ const balanceElement = document.getElementById("balance");
 const playersElement = document.getElementById("players");
 const registerButton = document.getElementById("registerBtn");
 
-// Initialize Telegram
+// Initialize Telegram Mini App
 if (tg) {
   tg.ready();
   tg.expand();
+
+  if (tg.initData) {
+    console.log("Telegram authentication data received.");
+  }
 }
+
+// Show loading state
+registerButton.disabled = true;
+registerButton.textContent = "LOADING TOURNAMENT...";
 
 // Load tournament settings
 async function loadTournament() {
@@ -26,6 +34,8 @@ async function loadTournament() {
 
     const settings = await response.json();
 
+    console.log("Tournament settings:", settings);
+
     registerButton.disabled = false;
     registerButton.textContent =
       `REGISTER NOW - ${settings.entryFee} BR`;
@@ -35,37 +45,6 @@ async function loadTournament() {
 
     registerButton.disabled = true;
     registerButton.textContent = "TOURNAMENT UNAVAILABLE";
-  }
-}
-
-// Load real wallet balance
-async function loadBalance() {
-  if (!tg || !tg.initData) {
-    balanceElement.textContent = "—";
-    return;
-  }
-
-  try {
-    const response = await fetch(
-      `${API_URL}/api/player/balance`,
-      {
-        headers: {
-          "X-Telegram-Init-Data": tg.initData
-        }
-      }
-    );
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Wallet unavailable.");
-    }
-
-    balanceElement.textContent = result.balance;
-
-  } catch (error) {
-    console.error("Wallet error:", error);
-    balanceElement.textContent = "—";
   }
 }
 
@@ -95,10 +74,13 @@ async function registerTournament() {
     const result = await response.json();
 
     if (!response.ok) {
-      throw new Error(result.error || "Registration failed.");
+      throw new Error(
+        result.error || "Registration failed."
+      );
     }
 
     balanceElement.textContent = result.balance;
+
     registerButton.textContent = "REGISTERED ✓";
 
     alert("Congratulations! You are registered.");
@@ -115,4 +97,91 @@ async function registerTournament() {
 
 // Start application
 loadTournament();
-loadBalance();
+// ===================================
+// BINGO CHAMPIONS - BOTTOM NAVIGATION
+// ===================================
+
+const homeSections = document.querySelectorAll(
+  ".welcome, .wallet, .tournament-card, .stats"
+);
+
+const navButtons = document.querySelectorAll(".bottom-nav button");
+
+const tabContent = document.createElement("section");
+tabContent.id = "tabContent";
+tabContent.style.display = "none";
+
+document.querySelector(".app").appendChild(tabContent);
+
+function showTab(tab) {
+  navButtons.forEach(button => {
+    button.classList.toggle(
+      "active",
+      button.dataset.tab === tab
+    );
+  });
+
+  homeSections.forEach(section => {
+    section.style.display = tab === "home" ? "" : "none";
+  });
+
+  tabContent.style.display = tab === "home" ? "none" : "block";
+
+  if (tab === "brackets") {
+    showBrackets();
+  } else if (tab === "matches") {
+    tabContent.innerHTML = `
+      <h2>MY MATCHES</h2>
+      <p>Your group and match details will appear here after assignment.</p>
+    `;
+  } else if (tab === "history") {
+    tabContent.innerHTML = `
+      <h2>MATCH HISTORY</h2>
+      <p>Your completed matches and results will appear here.</p>
+    `;
+  } else if (tab === "info") {
+    tabContent.innerHTML = `
+      <h2>TOURNAMENT INFO</h2>
+      <p>Entry fee: 200 BR</p>
+      <p>Groups: 32</p>
+      <p>Tournament starts: 4:30 PM Addis Ababa time.</p>
+    `;
+  }
+}
+
+function showBrackets() {
+  let groups = "";
+
+  for (let i = 1; i <= 32; i++) {
+    groups += `
+      <div class="bracket-group">
+        <strong>GROUP ${i}</strong>
+        <span>Awaiting assignment</span>
+      </div>
+    `;
+  }
+
+  tabContent.innerHTML = `
+    <h2>TOURNAMENT BRACKETS</h2>
+    <p>32 groups · 32 qualifying places</p>
+
+    <h3>PRELIMINARY ROUND</h3>
+    <div class="bracket-grid">
+      ${groups}
+    </div>
+
+    <h3>KNOCKOUT STAGES</h3>
+
+    <div class="bracket-round">ROUND OF 32 — 32 PLAYERS</div>
+    <div class="bracket-round">ROUND OF 16 — 16 PLAYERS</div>
+    <div class="bracket-round">QUARTER-FINALS — 8 PLAYERS</div>
+    <div class="bracket-round">SEMI-FINALS — 4 PLAYERS</div>
+    <div class="bracket-round">GRAND FINAL — 2 PLAYERS</div>
+  `;
+}
+
+navButtons.forEach(button => {
+  button.addEventListener("click", () => {
+    showTab(button.dataset.tab);
+  });
+});
