@@ -3,11 +3,11 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 const { db } = require("./firebase");
 const registrationRouter = require("./registration");
 
-// Start Telegram bot automatically
 require("./bot");
 
 const {
@@ -22,19 +22,17 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Serve frontend files
+app.use(express.static(path.join(__dirname, "public")));
+
 // Tournament registration
 app.use("/api/tournament", registrationRouter);
-
-// Home
-app.get("/", (req, res) => {
-  res.send("Bingo Tournament Server is running!");
-});
 
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "online",
-    server: "Bingo Tournament",
+    server: "Bingo Champions",
     time: new Date().toISOString()
   });
 });
@@ -48,26 +46,7 @@ app.get("/api/tournament/settings", (req, res) => {
   });
 });
 
-// Firebase connection check
-app.get("/api/firebase", async (req, res) => {
-  try {
-    await db.ref(".info/connected").once("value");
-
-    res.json({
-      status: "connected",
-      database: "Firebase Realtime Database"
-    });
-  } catch (error) {
-    console.error("Firebase error:", error);
-
-    res.status(500).json({
-      status: "error",
-      message: "Firebase connection failed"
-    });
-  }
-});
-
 // Start backend
 app.listen(PORT, () => {
-  console.log(`Bingo Tournament Server running on port ${PORT}`);
+  console.log(`Bingo Champions running on port ${PORT}`);
 });
