@@ -9,15 +9,11 @@ if (!TOKEN) {
   throw new Error("TELEGRAM_BOT_TOKEN is missing.");
 }
 
-if (!WEBAPP_URL || !WEBAPP_URL.startsWith("https://")) {
-  throw new Error("A valid HTTPS WEBAPP_URL is required.");
-}
-
 const bot = new TelegramBot(TOKEN, {
   polling: true
 });
 
-// Create or update player account
+// Create player account
 async function createPlayer(user) {
   const playerRef = db.ref(`players/${user.id}`);
 
@@ -39,30 +35,31 @@ async function createPlayer(user) {
 
     return player;
   });
-
-  return playerRef.once("value");
 }
 
 // Main menu
 function mainMenu() {
+  const buttons = [];
+
+  if (WEBAPP_URL && WEBAPP_URL.startsWith("https://")) {
+    buttons.push([
+      {
+        text: "🏆 PLAY BINGO CHAMPIONS",
+        web_app: { url: WEBAPP_URL }
+      }
+    ]);
+  }
+
+  buttons.push([
+    {
+      text: "💰 MY BALANCE",
+      callback_data: "balance"
+    }
+  ]);
+
   return {
     reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: "🎮 PLAY TOURNAMENT",
-            web_app: {
-              url: WEBAPP_URL
-            }
-          }
-        ],
-        [
-          {
-            text: "💰 MY BALANCE",
-            callback_data: "balance"
-          }
-        ]
-      ]
+      inline_keyboard: buttons
     }
   };
 }
@@ -74,16 +71,12 @@ bot.onText(/^\/start$/, async (msg) => {
 
     bot.sendMessage(
       msg.chat.id,
-      `Welcome ${msg.from.first_name || "Player"}!\n\nWelcome to Bingo Tournament.\n\nRegister and compete to win prizes!`,
+      `Welcome ${msg.from.first_name || "Player"}!\n\n🏆 Welcome to Bingo Champions!\n\nYour tournament adventure starts here.`,
       mainMenu()
     );
   } catch (error) {
     console.error("Start error:", error);
-
-    bot.sendMessage(
-      msg.chat.id,
-      "Unable to open your account. Please try again."
-    );
+    bot.sendMessage(msg.chat.id, "Unable to open your account. Please try again.");
   }
 });
 
@@ -103,11 +96,7 @@ bot.onText(/^\/balance$/, async (msg) => {
     );
   } catch (error) {
     console.error("Balance error:", error);
-
-    bot.sendMessage(
-      msg.chat.id,
-      "Unable to check your balance. Please try again."
-    );
+    bot.sendMessage(msg.chat.id, "Unable to check your balance.");
   }
 });
 
@@ -116,6 +105,13 @@ bot.onText(/^\/play$/, async (msg) => {
   try {
     await createPlayer(msg.from);
 
+    if (!WEBAPP_URL || !WEBAPP_URL.startsWith("https://")) {
+      return bot.sendMessage(
+        msg.chat.id,
+        "🏆 Bingo Champions is being prepared. The tournament will open soon."
+      );
+    }
+
     bot.sendMessage(
       msg.chat.id,
       "Ready to compete? Open the tournament below.",
@@ -123,11 +119,7 @@ bot.onText(/^\/play$/, async (msg) => {
     );
   } catch (error) {
     console.error("Play error:", error);
-
-    bot.sendMessage(
-      msg.chat.id,
-      "Unable to open the tournament. Please try again."
-    );
+    bot.sendMessage(msg.chat.id, "Unable to open the tournament.");
   }
 });
 
@@ -161,6 +153,6 @@ bot.on("polling_error", (error) => {
   console.error("Telegram polling error:", error.message);
 });
 
-console.log("Bingo Tournament Telegram Bot started.");
+console.log("Bingo Champions bot started.");
 
 module.exports = bot;
