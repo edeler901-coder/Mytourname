@@ -5,20 +5,20 @@ const {
 } = require("./registration");
 
 const TIME_ZONE = "Africa/Addis_Ababa";
-const MIN_DAILY_SIMS = 55;
-const MAX_DAILY_SIMS = 75;
-const CHECK_INTERVAL = 30 * 1000;
+const MIN_SIMS = 55;
+const MAX_SIMS = 75;
+const CHECK_INTERVAL = 30000;
 
 let schedulerStarted = false;
 
-// Get today's date in Addis Ababa
-function getAddisDate() {
+// Get date in Addis Ababa
+function getAddisDate(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).formatToParts(new Date());
+  }).formatToParts(date);
 
   const values = {};
 
@@ -29,9 +29,20 @@ function getAddisDate() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-// Convert Addis Ababa local time to timestamp.
-// Ethiopia uses UTC+3.
-function addisTimeToTimestamp(date, hour, minute) {
+// Get tomorrow's date
+function getTomorrowDate() {
+  const today = getAddisDate();
+  const [year, month, day] = today.split("-").map(Number);
+
+  const tomorrow = new Date(
+    Date.UTC(year, month - 1, day + 1)
+  );
+
+  return tomorrow.toISOString().slice(0, 10);
+}
+
+// Convert Addis local time to timestamp
+function addisTimestamp(date, hour, minute) {
   const [year, month, day] = date.split("-").map(Number);
 
   return Date.UTC(
@@ -43,9 +54,9 @@ function addisTimeToTimestamp(date, hour, minute) {
   );
 }
 
-// Randomly shuffle accounts
-function shuffle(array) {
-  const result = [...array];
+// Random shuffle
+function shuffle(items) {
+  const result = [...items];
 
   for (let i = result.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -59,13 +70,10 @@ function shuffle(array) {
   return result;
 }
 
-// Generate random daily registration schedule
-function createDailySchedule(date, simulatorIds) {
+// Create daily schedule
+function createDailySchedule(date, tournamentDate, simulatorIds) {
   const dailyTotal =
-    Math.floor(
-      Math.random() *
-      (MAX_DAILY_SIMS - MIN_DAILY_SIMS + 1)
-    ) + MIN_DAILY_SIMS;
+    Math.floor(Math.random() * 21) + MIN_SIMS;
 
   const selected = shuffle(simulatorIds).slice(
     0,
@@ -78,7 +86,8 @@ function createDailySchedule(date, simulatorIds) {
   for (let i = 0; i < 8; i++) {
     tasks.push({
       playerId: selected[i],
-      runAt: addisTimeToTimestamp(date, 14, 30),
+      runAt: addisTimestamp(date, 14, 30),
+      batch: "first",
       status: "pending"
     });
   }
@@ -87,28 +96,26 @@ function createDailySchedule(date, simulatorIds) {
   for (let i = 8; i < 21; i++) {
     tasks.push({
       playerId: selected[i],
-      runAt: addisTimeToTimestamp(date, 16, 25),
+      runAt: addisTimestamp(date, 16, 25),
+      batch: "second",
       status: "pending"
     });
   }
 
-  // Remaining sims register at random times
-  // throughout the day until midnight.
+  // Remaining sims: random times throughout the day
   for (let i = 21; i < dailyTotal; i++) {
     const randomMinute = Math.floor(
-      Math.random() * (24 * 60)
+      Math.random() * 1440
     );
-
-    const hour = Math.floor(randomMinute / 60);
-    const minute = randomMinute % 60;
 
     tasks.push({
       playerId: selected[i],
-      runAt: addisTimeToTimestamp(
+      runAt: addisTimestamp(
         date,
-        hour,
-        minute
+        Math.floor(randomMinute / 60),
+        randomMinute % 60
       ),
+      batch: "random",
       status: "pending"
     });
   }
@@ -116,20 +123,22 @@ function createDailySchedule(date, simulatorIds) {
   tasks.sort((a, b) => a.runAt - b.runAt);
 
   return {
-    date,
+    registrationDate: date,
+    tournamentDate,
+    tournamentId: tournamentDate,
     dailyTotal,
-    tournamentId: null,
     createdAt: Date.now(),
     tasks
   };
 }
 
-// Create or retrieve today's schedule
+// Prepare today's simulator schedule
 async function prepareDailySchedule() {
-  const date = getAddisDate();
+  const registrationDate = getAddisDate();
+  const tournamentDate = getTomorrowDate();
 
   const scheduleRef = db.ref(
-    `simulatorSchedules/${date}`
+    `simulatorSchedules/${registrationDate}`
   );
 
   const existing = await scheduleRef.once("value");
@@ -138,19 +147,28 @@ async function prepareDailySchedule() {
     return existing.val();
   }
 
-  const tournamentSnapshot = await db
-    .ref("tournaments/current")
-    .once("value");
+  // Tomorrow's tournament must already exist.
+  const tournamentRef = db.ref(
+    `tournaments/${tournamentDate}`
+  );
+
+  const tournamentSnapshot = await tournamentRef.once("value");
 
   if (!tournamentSnapshot.exists()) {
-    console.log("No current tournament configured.");
+    console.log(
+      `Tomorrow's tournament ${tournamentDate} is not configured yet.`
+    );
     return null;
   }
 
   const tournament = tournamentSnapshot.val();
 
-  if (tournament.registrationOpen !== true) {
-    console.log("Tournament registration is closed.");
+  if (
+    tournament.id !== tournamentDate ||
+    tournament.registrationOpen !== true ||
+    tournament.tournamentDate !== tournamentDate
+  ) {
+    console.log("Tomorrow's tournament is not ready.");
     return null;
   }
 
@@ -165,81 +183,89 @@ async function prepareDailySchedule() {
       player &&
       player.isSimulator === true &&
       Number.isFinite(player.balance) &&
-      player.balance >= Number(tournament.entryFee || 200)
+      player.balance >= Number(tournament.entryFee || 200) &&
+      !(
+        player.tournamentRegistrations &&
+        player.tournamentRegistrations[tournamentDate]
+      )
     )
     .map(([id]) => id);
 
-  if (simulatorIds.length < MAX_DAILY_SIMS) {
+  if (simulatorIds.length < MAX_SIMS) {
     console.error(
-      `Need at least ${MAX_DAILY_SIMS} eligible simulator accounts. Found ${simulatorIds.length}.`
+      `Need at least ${MAX_SIMS} eligible sims. Found ${simulatorIds.length}.`
     );
-
     return null;
   }
 
   const schedule = createDailySchedule(
-    date,
+    registrationDate,
+    tournamentDate,
     simulatorIds
   );
 
-  schedule.tournamentId = String(
-    tournament.id || "current"
-  );
-
-  const result = await scheduleRef.transaction(
-    (current) => {
-      if (current) return current;
-      return schedule;
-    }
-  );
-
-  const savedSchedule = result.snapshot.val();
+  // Save only once. Do not generate a new random schedule
+  // if the server restarts.
+  const result = await scheduleRef.transaction((current) => {
+    if (current) return current;
+    return schedule;
+  });
 
   console.log(
-    `Simulator schedule ready: ${savedSchedule.dailyTotal} registrations for ${date}.`
+    `Prepared ${result.snapshot.val().dailyTotal} simulator registrations for ${tournamentDate}.`
   );
 
-  return savedSchedule;
+  return result.snapshot.val();
 }
 
-// Process registrations whose scheduled time has arrived
+// Process registrations that are due
 async function processDueRegistrations() {
   try {
-    const date = getAddisDate();
+    const registrationDate = getAddisDate();
 
     const scheduleRef = db.ref(
-      `simulatorSchedules/${date}`
+      `simulatorSchedules/${registrationDate}`
     );
 
-    const snapshot = await scheduleRef.once("value");
+    let snapshot = await scheduleRef.once("value");
 
     if (!snapshot.exists()) {
-      await prepareDailySchedule();
-      return;
+      const prepared = await prepareDailySchedule();
+
+      if (!prepared) return;
+
+      snapshot = await scheduleRef.once("value");
     }
 
     const schedule = snapshot.val();
 
-    const tournamentSnapshot = await db
-      .ref("tournaments/current")
-      .once("value");
+    if (!schedule) return;
+
+    const tournamentRef = db.ref(
+      `tournaments/${schedule.tournamentDate}`
+    );
+
+    const tournamentSnapshot = await tournamentRef.once("value");
 
     if (!tournamentSnapshot.exists()) return;
 
     const tournament = tournamentSnapshot.val();
 
-    if (tournament.registrationOpen !== true) return;
-
-    const currentTournamentId = String(
-      tournament.id || "current"
-    );
-
-    if (currentTournamentId !== schedule.tournamentId) {
-      console.error("Tournament ID does not match today's simulator schedule.");
+    if (
+      tournament.registrationOpen !== true ||
+      tournament.id !== schedule.tournamentId
+    ) {
       return;
     }
 
     const now = Date.now();
+    const registrationClosesAt = addisTimestamp(
+      schedule.registrationDate,
+      24,
+      0
+    );
+
+    if (now >= registrationClosesAt) return;
 
     for (let i = 0; i < schedule.tasks.length; i++) {
       const task = schedule.tasks[i];
@@ -251,8 +277,7 @@ async function processDueRegistrations() {
         continue;
       }
 
-      const taskRef = scheduleRef
-        .child(`tasks/${i}`);
+      const taskRef = scheduleRef.child(`tasks/${i}`);
 
       try {
         await registerPlayerForTournament(
@@ -271,17 +296,14 @@ async function processDueRegistrations() {
 
       } catch (error) {
         console.error(
-          `Simulator registration failed for ${task.playerId}:`,
+          `Simulator registration failed: ${task.playerId}`,
           error.message
         );
       }
     }
 
   } catch (error) {
-    console.error(
-      "Simulator scheduler error:",
-      error
-    );
+    console.error("Simulator scheduler error:", error);
   }
 }
 
@@ -291,12 +313,10 @@ function startSimulatorScheduler() {
 
   schedulerStarted = true;
 
-  console.log("Simulator scheduler started.");
+  console.log("Bingo Champions simulator scheduler started.");
 
-  // Check immediately
   processDueRegistrations();
 
-  // Check every 30 seconds
   setInterval(
     processDueRegistrations,
     CHECK_INTERVAL
@@ -304,5 +324,7 @@ function startSimulatorScheduler() {
 }
 
 module.exports = {
-  startSimulatorScheduler
+  startSimulatorScheduler,
+  prepareDailySchedule,
+  processDueRegistrations
 };
