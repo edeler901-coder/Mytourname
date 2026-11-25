@@ -3,7 +3,18 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const admin = require("firebase-admin");
+
+const { db } = require("./firebase");
+
+const {
+  ENTRY_FEE,
+  TOTAL_GROUPS,
+  PRIZE_SPLIT,
+  createGroups,
+  createGroupSchedule,
+  createPairings,
+  calculatePrizes
+} = require("./tournament");
 
 const app = express();
 
@@ -12,19 +23,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Firebase connection
-const serviceAccount = JSON.parse(
-  process.env.FIREBASE_SERVICE_ACCOUNT
-);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: process.env.FIREBASE_DATABASE_URL
-});
-
-const db = admin.database();
-
-// Home route
+// Server status
 app.get("/", (req, res) => {
   res.send("Bingo Tournament Server is running!");
 });
@@ -33,31 +32,19 @@ app.get("/", (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({
     status: "online",
-    server: "Bingo Tournament",
-    time: new Date().toISOString()
+    server: "Bingo Tournament"
   });
 });
 
-// Firebase connection check
-app.get("/api/firebase", async (req, res) => {
-  try {
-    await db.ref(".info/connected").once("value");
-
-    res.json({
-      status: "connected",
-      database: "Firebase Realtime Database"
-    });
-  } catch (error) {
-    console.error("Firebase error:", error);
-
-    res.status(500).json({
-      status: "error",
-      message: "Firebase connection failed"
-    });
-  }
+// Tournament settings
+app.get("/api/tournament/settings", (req, res) => {
+  res.json({
+    entryFee: ENTRY_FEE,
+    totalGroups: TOTAL_GROUPS,
+    prizeSplit: PRIZE_SPLIT
+  });
 });
 
-// Start server
 app.listen(PORT, () => {
-  console.log(`Bingo Tournament Server running on port ${PORT}`);
+  console.log(`Bingo Tournament running on port ${PORT}`);
 });
