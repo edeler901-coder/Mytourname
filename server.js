@@ -81,6 +81,53 @@ app.get("/api/player/balance", requireTelegramAuth, async (req, res) => {
   }
 });
 
+// Get the authenticated player's tournament assignment
+app.get("/api/player/assignment", requireTelegramAuth, async (req, res) => {
+  try {
+    const telegramId = String(req.telegramUser.id);
+
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Addis_Ababa",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+
+    const date = {};
+    parts.forEach(part => {
+      date[part.type] = part.value;
+    });
+
+    const tournamentDate =
+      `${date.year}-${date.month}-${date.day}`;
+
+    const snapshot = await db
+      .ref(`tournaments/${tournamentDate}/playerAssignments/${telegramId}`)
+      .once("value");
+
+    if (!snapshot.exists()) {
+      return res.json({
+        success: true,
+        assigned: false,
+        message: "No group assignment found yet."
+      });
+    }
+
+    return res.json({
+      success: true,
+      assigned: true,
+      assignment: snapshot.val()
+    });
+
+  } catch (error) {
+    console.error("Assignment lookup error:", error);
+
+    return res.status(500).json({
+      error: "Unable to load tournament assignment."
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`Bingo Champions running on port ${PORT}`);
