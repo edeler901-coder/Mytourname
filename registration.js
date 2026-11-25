@@ -1,17 +1,55 @@
 
 const express = require("express");
+const crypto = require("crypto");
 const { db } = require("./firebase");
 const { requireTelegramAuth } = require("./telegramAuth");
 const { ENTRY_FEE } = require("./tournament");
 
 const router = express.Router();
 
-// Shared registration function.
-// Human and simulator accounts can use the same function.
+const TIME_ZONE = "Africa/Addis_Ababa";
+
+// Get today's date in Addis Ababa
+function getAddisDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+
+  const values = {};
+
+  for (const part of parts) {
+    values[part.type] = part.value;
+  }
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+// Get tomorrow's date
+function getTomorrowDate() {
+  const [year, month, day] = getAddisDate()
+    .split("-")
+    .map(Number);
+
+  return new Date(
+    Date.UTC(year, month - 1, day + 1)
+  ).toISOString().slice(0, 10);
+}
+
+// Registration closes at midnight Addis Ababa time
+function getRegistrationDeadline(date) {
+  const [year, month, day] = date.split("-").map(Number);
+
+  return Date.UTC(year, month - 1, day + 1, -3, 0, 0);
+}
+
+// Shared registration function
 async function registerPlayerForTournament(telegramId, tournament) {
   telegramId = String(telegramId);
 
-  const tournamentId = String(tournament.id || "current");
+  const tournamentId = String(tournament.id || "");
   const entryFee = Number(tournament.entryFee || ENTRY_FEE);
 
   if (
@@ -25,12 +63,28 @@ async function registerPlayerForTournament(telegramId, tournament) {
     throw new Error("Invalid registration information.");
   }
 
-  const playerRef = db.ref(`players/${telegramId}`);
+  if (
+    tournament.registrationOpen !== true ||
+    tournament.tournamentDate !== tournamentId
+  ) {
+    throw new Error("Tournament registration is closed.");
+  }
 
+  const registrationDate = getAddisDate();
+
+  if (tournamentId !== getTomorrowDate()) {
+    throw new Error("This is not the next tournament.");
+  }
+
+  if (Date.now() >= getRegistrationDeadline(registrationDate)) {
+    throw new Error("Registration deadline has passed.");
+  }
+
+  const playerRef = db.ref(`players/${telegramId}`);
+  const registrationToken = crypto.randomUUID();
   const registeredAt = Date.now();
 
-  // Deduct balance and record registration together
-  // inside one player transaction.
+  // Deduct the entry fee and record registration atomically
   const result = await playerRef.transaction((player) => {
     if (!player) return;
 
@@ -40,7 +94,6 @@ async function registerPlayerForTournament(telegramId, tournament) {
       player.tournamentRegistrations = {};
     }
 
-    // Prevent duplicate registration and duplicate payment.
     if (player.tournamentRegistrations[tournamentId]) {
       return player;
     }
@@ -53,6 +106,7 @@ async function registerPlayerForTournament(telegramId, tournament) {
       tournamentId,
       entryFee,
       registeredAt,
+      registrationToken,
       status: "registered"
     };
 
@@ -65,14 +119,13 @@ async function registerPlayerForTournament(telegramId, tournament) {
     player?.tournamentRegistrations?.[tournamentId];
 
   if (!registration) {
-    throw new Error(
-      "Registration failed. Check your balance."
-    );
+    throw new Error("Insufficient balance or registration failed.");
   }
 
-  // Maintain a separate tournament registration list.
-  // If a previous request failed here, a retry repairs it
-  // without deducting the entry fee again.
+  const alreadyRegistered =
+    registration.registrationToken !== registrationToken;
+
+  // Repair or create the tournament registration list
   const registrationRef = db.ref(
     `tournaments/${tournamentId}/registrations/${telegramId}`
   );
@@ -92,38 +145,33 @@ async function registerPlayerForTournament(telegramId, tournament) {
   return {
     success: true,
     balance: player.balance,
-    alreadyRegistered:
-      registration.registeredAt !== registeredAt
+    alreadyRegistered
   };
 }
 
-// Human player registration endpoint
+// Human registration endpoint
 router.post("/register", requireTelegramAuth, async (req, res) => {
   try {
+    const tournamentDate = getTomorrowDate();
+
     const tournamentSnapshot = await db
-      .ref("tournaments/current")
+      .ref(`tournaments/${tournamentDate}`)
       .once("value");
 
     if (!tournamentSnapshot.exists()) {
       return res.status(503).json({
-        error: "Tournament is not configured yet."
+        error: "The next tournament is not ready yet."
       });
     }
 
     const tournament = tournamentSnapshot.val();
-
-    if (tournament.registrationOpen !== true) {
-      return res.status(403).json({
-        error: "Tournament registration is closed."
-      });
-    }
 
     const result = await registerPlayerForTournament(
       req.telegramUser.id,
       tournament
     );
 
-    res.json({
+    return res.json({
       success: true,
       message: result.alreadyRegistered
         ? "You are already registered."
@@ -136,8 +184,19 @@ router.post("/register", requireTelegramAuth, async (req, res) => {
   } catch (error) {
     console.error("Registration error:", error);
 
-    res.status(500).json({
-      error: "Registration failed. Please try again."
+    const message = error.message || "Registration failed.";
+
+    const status =
+      message.includes("closed") ||
+      message.includes("deadline") ||
+      message.includes("next tournament")
+        ? 403
+        : message.includes("Insufficient balance")
+          ? 400
+          : 500;
+
+    return res.status(status).json({
+      error: message
     });
   }
 });
