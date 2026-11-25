@@ -7,6 +7,7 @@ const path = require("path");
 
 const { db } = require("./firebase");
 const registrationRouter = require("./registration");
+const { requireTelegramAuth } = require("./telegramAuth");
 
 require("./bot");
 
@@ -22,7 +23,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Serve frontend files
+// Serve frontend
 app.use(express.static(path.join(__dirname, "public")));
 
 // Tournament registration
@@ -46,7 +47,32 @@ app.get("/api/tournament/settings", (req, res) => {
   });
 });
 
-// Start backend
+// Secure player wallet balance
+app.get("/api/player/balance", requireTelegramAuth, async (req, res) => {
+  try {
+    const telegramId = String(req.telegramUser.id);
+
+    const snapshot = await db
+      .ref(`players/${telegramId}/balance`)
+      .once("value");
+
+    const balance = snapshot.val();
+
+    res.json({
+      success: true,
+      balance: Number.isFinite(balance) ? balance : 0
+    });
+
+  } catch (error) {
+    console.error("Wallet error:", error);
+
+    res.status(500).json({
+      error: "Unable to load wallet balance."
+    });
+  }
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`Bingo Champions running on port ${PORT}`);
 });
