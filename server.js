@@ -6,7 +6,7 @@ const cors = require("cors");
 const path = require("path");
 
 const { db } = require("./firebase");
-const registrationRouter = require("./registration");
+const { router: registrationRouter } = require("./registration");
 const { requireTelegramAuth } = require("./telegramAuth");
 
 require("./bot");
@@ -23,10 +23,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Serve frontend
+// Frontend
 app.use(express.static(path.join(__dirname, "public")));
 
-// Tournament registration
+// Registration
 app.use("/api/tournament", registrationRouter);
 
 // Health check
@@ -47,7 +47,7 @@ app.get("/api/tournament/settings", (req, res) => {
   });
 });
 
-// Secure player wallet balance
+// Player wallet
 app.get("/api/player/balance", requireTelegramAuth, async (req, res) => {
   try {
     const telegramId = String(req.telegramUser.id);
