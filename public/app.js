@@ -7,19 +7,11 @@ const balanceElement = document.getElementById("balance");
 const playersElement = document.getElementById("players");
 const registerButton = document.getElementById("registerBtn");
 
-// Initialize Telegram Mini App
+// Initialize Telegram
 if (tg) {
   tg.ready();
   tg.expand();
-
-  if (tg.initData) {
-    console.log("Telegram authentication data received.");
-  }
 }
-
-// Show loading state
-registerButton.disabled = true;
-registerButton.textContent = "LOADING TOURNAMENT...";
 
 // Load tournament settings
 async function loadTournament() {
@@ -34,8 +26,6 @@ async function loadTournament() {
 
     const settings = await response.json();
 
-    console.log("Tournament settings:", settings);
-
     registerButton.disabled = false;
     registerButton.textContent =
       `REGISTER NOW - ${settings.entryFee} BR`;
@@ -45,6 +35,37 @@ async function loadTournament() {
 
     registerButton.disabled = true;
     registerButton.textContent = "TOURNAMENT UNAVAILABLE";
+  }
+}
+
+// Load real wallet balance
+async function loadBalance() {
+  if (!tg || !tg.initData) {
+    balanceElement.textContent = "—";
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/player/balance`,
+      {
+        headers: {
+          "X-Telegram-Init-Data": tg.initData
+        }
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Wallet unavailable.");
+    }
+
+    balanceElement.textContent = result.balance;
+
+  } catch (error) {
+    console.error("Wallet error:", error);
+    balanceElement.textContent = "—";
   }
 }
 
@@ -74,13 +95,10 @@ async function registerTournament() {
     const result = await response.json();
 
     if (!response.ok) {
-      throw new Error(
-        result.error || "Registration failed."
-      );
+      throw new Error(result.error || "Registration failed.");
     }
 
     balanceElement.textContent = result.balance;
-
     registerButton.textContent = "REGISTERED ✓";
 
     alert("Congratulations! You are registered.");
@@ -97,3 +115,4 @@ async function registerTournament() {
 
 // Start application
 loadTournament();
+loadBalance();
