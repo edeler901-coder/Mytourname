@@ -5,8 +5,10 @@ const express = require("express");
 const cors = require("cors");
 
 const { db } = require("./firebase");
-
 const registrationRouter = require("./registration");
+
+// Start Telegram bot automatically
+require("./bot");
 
 const {
   ENTRY_FEE,
@@ -20,10 +22,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Registration routes
+// Tournament registration
 app.use("/api/tournament", registrationRouter);
 
-// Server status
+// Home
 app.get("/", (req, res) => {
   res.send("Bingo Tournament Server is running!");
 });
@@ -65,9 +67,7 @@ app.get("/api/firebase", async (req, res) => {
   }
 });
 
-// Start server
+// Start backend
 app.listen(PORT, () => {
-  console.log(
-    `Bingo Tournament Server running on port ${PORT}`
-  );
+  console.log(`Bingo Tournament Server running on port ${PORT}`);
 });
