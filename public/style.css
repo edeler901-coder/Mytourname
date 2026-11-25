@@ -1,0 +1,343 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+  --background: #10091f;
+  --card: #211438;
+  --purple: #8b5cf6;
+  --gold: #f5ca70;
+  --white: #ffffff;
+  --muted: #a99dbd;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--white);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 480px;
+  margin: auto;
+  padding: 20px 16px 100px;
+}
+
+/* HEADER */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 28px;
+}
+
+.logo {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #f7d58a, #bd842b);
+  border-radius: 15px;
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+}
+
+.header h1 {
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.header p {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 2px;
+  margin-top: 4px;
+}
+
+.live {
+  margin-left: auto;
+  font-size: 10px;
+  color: #55e69a;
+  background: #173e30;
+  padding: 8px 10px;
+  border-radius: 20px;
+  font-weight: 800;
+}
+
+.live span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #55e69a;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+/* WELCOME */
+
+.welcome {
+  padding: 18px 4px 25px;
+}
+
+.small-title {
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  margin-bottom: 13px;
+}
+
+.welcome h2 {
+  font-size: 35px;
+  line-height: 1.15;
+  font-weight: 900;
+}
+
+.welcome h2 span {
+  color: var(--gold);
+}
+
+.description {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 12px;
+  max-width: 300px;
+}
+
+/* WALLET */
+
+.wallet {
+  background: linear-gradient(120deg, #43236f, #291747);
+  border: 1px solid #63448e;
+  border-radius: 18px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.wallet p {
+  color: #d1bce9;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.wallet h2 {
+  font-size: 29px;
+  margin-top: 8px;
+}
+
+.wallet small {
+  font-size: 13px;
+  color: var(--gold);
+}
+
+.wallet-icon {
+  font-size: 34px;
+}
+
+/* TOURNAMENT */
+
+.tournament-card {
+  background: linear-gradient(145deg, #2b1945, #1d1231);
+  border: 1px solid #604184;
+  border-radius: 22px;
+  padding: 21px 18px;
+  box-shadow: 0 15px 35px #00000040;
+}
+
+.tournament-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tag {
+  color: var(--gold);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.status {
+  background: #49351e;
+  color: var(--gold);
+  padding: 6px 9px;
+  border-radius: 20px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.tournament-card h2 {
+  font-size: 20px;
+  font-weight: 900;
+  margin-top: 25px;
+  letter-spacing: .5px;
+}
+
+.entry-label {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 19px;
+  letter-spacing: 2px;
+  font-weight: 700;
+}
+
+.tournament-card > h1 {
+  color: var(--gold);
+  font-size: 42px;
+  margin-top: 3px;
+}
+
+.tournament-card > h1 small {
+  font-size: 15px;
+}
+
+/* PRIZES */
+
+.prizes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 23px 0;
+}
+
+.prizes div {
+  background: #38234f;
+  border-radius: 12px;
+  padding: 13px 5px;
+  text-align: center;
+}
+
+.prizes strong {
+  display: block;
+  color: var(--gold);
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.prizes span {
+  display: block;
+  color: #c4b4d5;
+  font-size: 8px;
+  margin-top: 6px;
+  font-weight: 800;
+}
+
+/* REGISTER BUTTON */
+
+#registerBtn {
+  width: 100%;
+  border: none;
+  border-radius: 13px;
+  padding: 17px;
+  background: linear-gradient(100deg, #f5d58c, #c48c37);
+  color: #251633;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  cursor: pointer;
+  box-shadow: 0 7px 20px #bd8a3840;
+}
+
+#registerBtn:active {
+  transform: scale(.98);
+}
+
+.notice {
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 13px;
+}
+
+/* STATS */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.stats div {
+  background: var(--card);
+  padding: 15px 5px;
+  text-align: center;
+  border-radius: 13px;
+}
+
+.stats strong {
+  display: block;
+  color: var(--gold);
+  font-size: 16px;
+}
+
+.stats span {
+  display: block;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 700;
+  margin-top: 7px;
+}
+
+/* BOTTOM NAVIGATION */
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  background: #1c1230;
+  border-top: 1px solid #39254f;
+  display: flex;
+  justify-content: space-around;
+  padding: 12px 5px calc(12px + env(safe-area-inset-bottom));
+  z-index: 10;
+}
+
+.bottom-nav button {
+  border: none;
+  background: transparent;
+  color: #9d8eaf;
+  font-size: 19px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.bottom-nav button span {
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.bottom-nav button.active {
+  color: var(--gold);
+}
+
+/* SMALL SCREENS */
+
+@media (max-width: 360px) {
+  .welcome h2 {
+    font-size: 30px;
+  }
+
+  .tournament-card h2 {
+    font-size: 17px;
+  }
+}
