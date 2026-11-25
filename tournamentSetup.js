@@ -1,6 +1,10 @@
 
 const { db } = require("./firebase");
 
+const {
+  closeExpiredTournaments
+} = require("./assignment");
+
 const TIME_ZONE = "Africa/Addis_Ababa";
 const ENTRY_FEE = 200;
 const CHECK_INTERVAL = 60000;
@@ -92,6 +96,15 @@ async function ensureTomorrowTournament() {
   return result.snapshot.val();
 }
 
+async function runTournamentChecks() {
+  try {
+    await ensureTomorrowTournament();
+    await closeExpiredTournaments();
+  } catch (error) {
+    console.error("Tournament check error:", error);
+  }
+}
+
 function startTournamentSetup() {
   if (setupStarted) return;
 
@@ -99,14 +112,10 @@ function startTournamentSetup() {
 
   console.log("Daily tournament setup started.");
 
-  ensureTomorrowTournament().catch((error) => {
-    console.error("Tournament setup error:", error);
-  });
+  runTournamentChecks();
 
   setInterval(() => {
-    ensureTomorrowTournament().catch((error) => {
-      console.error("Tournament setup error:", error);
-    });
+    runTournamentChecks();
   }, CHECK_INTERVAL);
 }
 
