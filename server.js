@@ -8,6 +8,7 @@ const path = require("path");
 const { db } = require("./firebase");
 const { router: registrationRouter } = require("./registration");
 const { requireTelegramAuth } = require("./telegramAuth");
+const { startSimulatorScheduler } = require("./simulatorScheduler");
 
 require("./bot");
 
@@ -26,7 +27,7 @@ app.use(express.json());
 // Frontend
 app.use(express.static(path.join(__dirname, "public")));
 
-// Registration
+// Tournament registration
 app.use("/api/tournament", registrationRouter);
 
 // Health check
@@ -75,4 +76,7 @@ app.get("/api/player/balance", requireTelegramAuth, async (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`Bingo Champions running on port ${PORT}`);
+
+  // Start automatic simulator registration
+  startSimulatorScheduler();
 });
