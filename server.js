@@ -8,7 +8,15 @@ const path = require("path");
 const { db } = require("./firebase");
 const { router: registrationRouter } = require("./registration");
 const { requireTelegramAuth } = require("./telegramAuth");
-const { startSimulatorScheduler } = require("./simulatorScheduler");
+
+const {
+  startSimulatorScheduler
+} = require("./simulatorScheduler");
+
+const {
+  startTournamentSetup,
+  ensureTomorrowTournament
+} = require("./tournamentSetup");
 
 require("./bot");
 
@@ -74,9 +82,25 @@ app.get("/api/player/balance", requireTelegramAuth, async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Bingo Champions running on port ${PORT}`);
 
-  // Start automatic simulator registration
-  startSimulatorScheduler();
+  try {
+    // Create tomorrow's tournament first
+    await ensureTomorrowTournament();
+
+    // Start automatic daily tournament setup
+    startTournamentSetup();
+
+    // Start simulator registration scheduler
+    startSimulatorScheduler();
+
+    console.log("Tournament systems initialized.");
+
+  } catch (error) {
+    console.error(
+      "Tournament initialization failed:",
+      error
+    );
+  }
 });
