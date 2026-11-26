@@ -379,30 +379,123 @@ async function getPlayerCard(
 // START MATCH AFTER SELECTION CLOSES
 // =====================================
 
+
 async function startMatch(tournamentDate, matchId) {
   const matchRef = getMatchRef(tournamentDate, matchId);
 
+  let rejectionReason = null;
+
   const result = await matchRef.transaction(match => {
+    rejectionReason = null;
+
     if (!match || match.status !== "board_selection") {
+      rejectionReason = "Match is not in board selection.";
       return;
     }
 
-    if (Date.now() < Number(match.selectionEndsAt)) {
+    const selectionEndsAt = Number(match.selectionEndsAt);
+
+    if (
+      !Number.isFinite(selectionEndsAt) ||
+      Date.now() < selectionEndsAt
+    ) {
+      rejectionReason = "Board selection time has not expired.";
       return;
     }
 
+    const players = Array.isArray(match.players)
+      ? match.players
+      : [];
+
+    if (players.length > TOTAL_BOARDS) {
+      rejectionReason = "There are more players than available boards.";
+      return;
+    }
+
+    const selection = match.boardSelection || {};
+
+    const oldPlayerBoards = selection.playerBoards || {};
+    const selectedBoards = {};
+    const playerBoards = {};
+    const usedBoards = new Set();
+
+    // Keep valid boards already selected by assigned players.
+    for (const player of players) {
+      const telegramId = String(player.telegramId);
+      const boardNumber = Number(oldPlayerBoards[telegramId]);
+
+      if (
+        Number.isInteger(boardNumber) &&
+        boardNumber >= 1 &&
+        boardNumber <= TOTAL_BOARDS &&
+        !usedBoards.has(boardNumber)
+      ) {
+        usedBoards.add(boardNumber);
+        selectedBoards[String(boardNumber)] = telegramId;
+        playerBoards[telegramId] = boardNumber;
+      }
+    }
+
+    // Find boards that are still available.
+    const availableBoards = [];
+
+    for (let number = 1; number <= TOTAL_BOARDS; number++) {
+      if (!usedBoards.has(number)) {
+        availableBoards.push(number);
+      }
+    }
+
+    // Automatically assign random boards to players
+    // who did not select one.
+    for (const player of players) {
+      const telegramId = String(player.telegramId);
+
+      if (playerBoards[telegramId]) {
+        continue;
+      }
+
+      if (availableBoards.length === 0) {
+        rejectionReason = "No available boards remain.";
+        return;
+      }
+
+      const randomIndex = require("crypto").randomInt(
+        availableBoards.length
+      );
+
+      const boardNumber = availableBoards.splice(
+        randomIndex,
+        1
+      )[0];
+
+      playerBoards[telegramId] = boardNumber;
+      selectedBoards[String(boardNumber)] = telegramId;
+    }
+
+    // Lock all board assignments and start the match.
+    match.boardSelection = {
+      selectedBoards,
+      playerBoards
+    };
+
+    match.boardsLockedAt = Date.now();
     match.status = "in_progress";
     match.startedAt = Date.now();
 
     return match;
   });
 
-  if (result.committed) {
-    console.log(`Match started: ${matchId}`);
+  if (!result.committed) {
+    throw new Error(
+      rejectionReason || "Unable to start match."
+    );
   }
 
-  return result.committed;
+  console.log(`Match started: ${matchId}`);
+
+  return true;
 }
+
 
 // =====================================
 // CALL NEXT NUMBER
