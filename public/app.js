@@ -130,11 +130,8 @@ function showTab(tab) {
   if (tab === "brackets") {
     showBrackets();
   } else if (tab === "matches") {
-    tabContent.innerHTML = `
-      <h2>MY MATCHES</h2>
-      <p>Your group and match details will appear here after assignment.</p>
-    `;
-  } else if (tab === "history") {
+  loadMyMatch();
+} else if (tab === "history") {
     tabContent.innerHTML = `
       <h2>MATCH HISTORY</h2>
       <p>Your completed matches and results will appear here.</p>
