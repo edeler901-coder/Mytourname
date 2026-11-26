@@ -372,18 +372,35 @@ app.post(["/api/sms/incoming", "/api/sms/incoming/:secret"], async (req, res) =>
     }
 
     const message = req.body && (req.body.message || req.body.text || req.body.sms);
-    const parsed = parseIncomingPaymentSms(message);
-    if (!parsed) {
-      return res.status(400).json({ success: false, error: "SMS could not be parsed." });
+    const now = Date.now();
+
+    // Some forwarder apps send a connection test without an SMS body.
+    if (typeof message !== "string" || !message.trim()) {
+      return res.json({ success: true, received: false, ping: true, message: "Webhook connection successful." });
     }
 
-    const now = Date.now();
+    // Save the original SMS first so a parser mismatch never loses the message.
+    const rawRef = db.ref("incomingPaymentSmsRaw").push();
+    await rawRef.set({
+      message: message.trim(),
+      receivedAt: now,
+      status: "received"
+    });
+
+    const parsed = parseIncomingPaymentSms(message);
+    if (!parsed) {
+      await rawRef.update({ status: "pending_parse" });
+      return res.status(202).json({ success: true, received: true, parsed: false, message: "SMS received and saved for parsing." });
+    }
+
     const transactionTime = parsed.transactionTime || now;
     if (transactionTime > now + 5 * 60 * 1000) {
-      return res.status(400).json({ success: false, error: "SMS date is in the future." });
+      await rawRef.update({ status: "invalid_future_date", transactionId: parsed.transactionId });
+      return res.status(202).json({ success: true, received: true, parsed: false, message: "SMS saved; date needs review." });
     }
     if (now - transactionTime > 72 * 60 * 60 * 1000) {
-      return res.status(410).json({ success: false, error: "Payment SMS is older than 72 hours." });
+      await rawRef.update({ status: "expired", transactionId: parsed.transactionId });
+      return res.status(202).json({ success: true, received: true, parsed: false, message: "SMS saved but payment is older than 72 hours." });
     }
 
     const safeId = parsed.transactionId.replace(/[^A-Z0-9_-]/g, "");
@@ -401,18 +418,20 @@ app.post(["/api/sms/incoming", "/api/sms/incoming/:secret"], async (req, res) =>
 
     if (!saved.committed) {
       const existing = saved.snapshot.val() || {};
+      await rawRef.update({ status: "duplicate", transactionId: parsed.transactionId });
       if (existing.transactionId === parsed.transactionId &&
           Number(existing.amount) === parsed.amount &&
           existing.status !== "available") {
-        return res.status(409).json({ success: false, error: "Transaction was already claimed." });
+        return res.status(200).json({ success: true, received: true, duplicate: true, message: "SMS received; transaction was already claimed." });
       }
-      return res.status(409).json({ success: false, error: "Transaction ID already received." });
+      return res.status(200).json({ success: true, received: true, duplicate: true, message: "SMS received; transaction ID already exists." });
     }
 
-    return res.json({ success: true, received: true, transactionId: parsed.transactionId });
+    await rawRef.update({ status: "parsed", transactionId: parsed.transactionId });
+    return res.json({ success: true, received: true, parsed: true, transactionId: parsed.transactionId });
   } catch (error) {
     console.error("Incoming SMS processing failed:", error.message);
-    return res.status(500).json({ success: false, error: "Unable to process incoming SMS." });
+    return res.status(500).json({ success: false, error: "Unable to receive incoming SMS." });
   }
 });
 
