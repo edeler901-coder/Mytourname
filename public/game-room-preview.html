@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bingo Champions — Game Room Preview</title>
+<style>
+:root{--bg:#101426;--panel:#1b2239;--panel2:#242d49;--line:#394563;--orange:#ff9d32;--text:#f5f6fb;--muted:#aab3c8;--grey:#596174;--marked:#f39a2f}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 50% -20%,#293354 0,#101426 48%);color:var(--text);font-family:Arial,sans-serif;padding:12px}
+.app{width:100%;max-width:none;margin:0}
+header{display:grid;grid-template-columns:1.35fr repeat(4,minmax(0,1fr));align-items:stretch;gap:8px;padding:0;background:transparent;border:0;border-radius:0}
+.brand,.meta div,.sound{min-width:0;min-height:56px;display:flex;align-items:center;justify-content:center;text-align:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px}
+.brand{font-weight:900;letter-spacing:1px;font-size:15px;white-space:nowrap;color:#fff}
+.meta{display:contents}
+.meta div{flex-direction:column;font-size:10px;color:var(--muted);line-height:1.2}
+.meta b{display:block;color:#fff;font-size:14px;margin-top:4px}
+.sound{font-size:11px;white-space:nowrap}
+.layout{display:grid;grid-template-columns:35% minmax(0,1fr);gap:8px;margin-top:12px;width:100%}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:12px;min-width:0;width:100%}
+.panel-title{font-weight:800;font-size:14px;margin:0 0 10px}
+.called-head,.card-head{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:5px}
+.called-head span{font-weight:900;text-align:center;padding:7px 0;border-radius:7px;color:#172033}.called-head span:nth-child(1){background:#ff5b5b}.called-head span:nth-child(2){background:#ffc247}.called-head span:nth-child(3){background:#58d68d}.called-head span:nth-child(4){background:#56a8ff}.called-head span:nth-child(5){background:#c58bff}
+.called-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
+.num{aspect-ratio:1/1;display:grid;place-items:center;background:#454e62;color:#e5e8ef;border:1px solid #657087;border-radius:7px;font-size:12px;font-weight:700}
+.num.called{background:var(--orange);border-color:#ffc06f;color:#251607}
+.right{display:flex;flex-direction:column;gap:12px}
+.current{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:11px;text-align:center}
+.current small{color:var(--muted);font-size:11px}.current strong{display:block;font-size:35px;color:var(--orange);margin-top:3px}
+.card-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+.card-cell{aspect-ratio:1/1;min-width:0;display:grid;place-items:center;border-radius:7px;background:#596174;border:1px solid #737e94;font-size:clamp(11px,2.2vw,16px);font-weight:800;color:#fff;cursor:pointer;user-select:none}
+.card-cell.marked{background:var(--marked);border-color:#ffc16d;color:#251607}
+.card-cell.free{background:#f4d58d;color:#38240a;border-color:#ffe6a8}
+.bingo{width:100%;border:0;border-radius:12px;background:linear-gradient(180deg,#ffb24d,#f28a1d);color:#251606;font-weight:900;font-size:18px;letter-spacing:1.2px;padding:14px;box-shadow:0 4px 0 #b95e12;cursor:pointer}
+.bingo:active{transform:translateY(2px);box-shadow:0 2px 0 #b95e12}
+.hint{font-size:10px;color:var(--muted);text-align:center;margin-top:-5px}
+.bottom{display:flex;gap:10px;margin-top:12px}.bottom button{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:#fff;font-weight:700}
+.bottom button:last-child{color:#ffb0a9;border-color:#70464c}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px;font-size:10px;color:var(--muted)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px;vertical-align:middle}
+@media(max-width:520px){body{padding:8px}header{grid-template-columns:1.25fr repeat(4,minmax(0,1fr));gap:5px}.brand,.meta div,.sound{min-height:52px;padding:5px 2px;border-radius:9px}.brand{font-size:10px;letter-spacing:0}.meta div{font-size:8px}.meta b{font-size:11px;margin-top:3px}.sound{font-size:9px;white-space:normal}.layout{grid-template-columns:35% minmax(0,1fr);gap:8px}.panel{padding:8px}.num{font-size:10px}.card-cell{font-size:10px}.panel-title{font-size:12px}.current strong{font-size:29px}.called-grid,.card-grid,.called-head,.card-head{gap:3px}.bingo{font-size:15px;padding:12px 5px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand">BINGO CHAMPIONS</div>
+  <div class="meta">
+    <div>GAME ID<b>#BC-2048</b></div>
+    <div>PLAYERS<b>24</b></div>
+    <div>CALLS<b>18 / 75</b></div>
+    <button class="sound" onclick="this.textContent=this.textContent==='🔊 Sound'?'🔇 Muted':'🔊 Sound'">🔊 Sound</button>
+  </div>
+</header>
+<main class="layout">
+  <section class="panel">
+    <h2 class="panel-title">Called Numbers</h2>
+    <div class="called-head"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
+    <div class="called-grid" id="calledGrid"></div>
+  </section>
+  <section class="right">
+    <div class="current"><small>CURRENT CALL</small><strong>G-52</strong></div>
+    <section class="panel">
+      <h2 class="panel-title">Your Cartela #27</h2>
+      <div class="card-grid" id="cardGrid"></div>
+      <div class="legend">
+        <span><i class="dot" style="background:#596174"></i>Unmarked</span>
+        <span><i class="dot" style="background:#f39a2f"></i>Marked</span>
+        <span><i class="dot" style="background:#f4d58d"></i>FREE</span>
+      </div>
+    </section>
+    <button class="bingo" onclick="alert('BINGO claim submitted for server verification.')">BINGO</button>
+    <div class="hint">BINGO button is always visible</div>
+  </section>
+</main>
+<div class="bottom"><button onclick="location.reload()">↻ Refresh</button><button onclick="alert('Leave game')">Leave</button></div>
+</div>
+<script>
+const called = new Set([3,8,12,17,22,26,31,35,39,42,46,49,52,56,61,64,68,73]);
+const grid=document.getElementById('calledGrid');
+for(let n=1;n<=75;n++){
+ const el=document.createElement('div');el.className='num'+(called.has(n)?' called':'');el.textContent=n;grid.appendChild(el);
+}
+const board=[
+  3,18,33,48,63,
+  7,21,36,51,66,
+  11,25,'FREE',54,70,
+  14,28,40,57,72,
+  15,30,44,60,75
+];
+const card=document.getElementById('cardGrid');
+board.forEach((v,i)=>{
+ const el=document.createElement('div');el.className='card-cell'+(v==='FREE'?' free':'');
+ el.textContent=v;
+ if(v!=='FREE') el.addEventListener('click',()=>el.classList.toggle('marked'));
+ card.appendChild(el);
+});
+</script>
+</body>
+</html>
