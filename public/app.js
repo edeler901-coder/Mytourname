@@ -166,7 +166,7 @@ setInterval(loadTournamentStats, 15000);
 // ===================================
 
 const homeSections = document.querySelectorAll(
-  ".welcome, .wallet, .tournament-card, .stats"
+  ".welcome-wallet-row, .tournament-card, .stats"
 );
 
 const navButtons = document.querySelectorAll(".bottom-nav button");
