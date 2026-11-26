@@ -1,14 +1,14 @@
-
 const crypto = require("crypto");
 const { db } = require("./firebase");
 
 const TIME_ZONE = "Africa/Addis_Ababa";
-const MIN_SIMS = 55;
-const MAX_SIMS = 75;
 const ENTRY_FEE = 200;
-const CHECK_INTERVAL = 30000;
+const CHECK_INTERVAL = 5 * 60 * 1000;
+const PROCESSING_LEASE = 10 * 60 * 1000;
+const SCHEDULE_VERSION = 2;
 
 let schedulerStarted = false;
+let schedulerTimer = null;
 
 function getAddisDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -19,34 +19,25 @@ function getAddisDate() {
   }).formatToParts(new Date());
 
   const values = {};
+  for (const part of parts) values[part.type] = part.value;
 
-  for (const part of parts) {
-    values[part.type] = part.value;
-  }
-
-  return `${values.year}-${values.month}-${values.day}`;
+  return values.year + "-" + values.month + "-" + values.day;
 }
 
-function getTomorrowDate() {
-  const [year, month, day] = getAddisDate()
-    .split("-")
-    .map(Number);
-
-  return new Date(
-    Date.UTC(year, month - 1, day + 1)
-  ).toISOString().slice(0, 10);
+function getTomorrowDate(dateString = getAddisDate()) {
+  const parts = dateString.split("-").map(Number);
+  return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] + 1))
+    .toISOString()
+    .slice(0, 10);
 }
 
-function addisTimestamp(date, hour, minute) {
-  const [year, month, day] = date.split("-").map(Number);
+function getAddisDayStart(dateString) {
+  const parts = dateString.split("-").map(Number);
+  return Date.UTC(parts[0], parts[1] - 1, parts[2], -3, 0, 0, 0);
+}
 
-  return Date.UTC(
-    year,
-    month - 1,
-    day,
-    hour - 3,
-    minute
-  );
+function getAddisDayEnd(dateString) {
+  return getAddisDayStart(dateString) + 24 * 60 * 60 * 1000;
 }
 
 function shuffle(items) {
@@ -54,213 +45,360 @@ function shuffle(items) {
 
   for (let i = result.length - 1; i > 0; i--) {
     const j = crypto.randomInt(i + 1);
-
-    [result[i], result[j]] = [
-      result[j],
-      result[i]
-    ];
+    [result[i], result[j]] = [result[j], result[i]];
   }
 
   return result;
 }
 
-function createDailySchedule(registrationDate, tournamentDate, ids) {
-  const dailyTotal =
-    crypto.randomInt(
-      MIN_SIMS,
-      Math.min(MAX_SIMS, ids.length) + 1
-    );
-
-  const selected = shuffle(ids).slice(0, dailyTotal);
-  const tasks = [];
-
-  // Exactly 8 at 2:30 PM
-  for (let i = 0; i < 8; i++) {
-    tasks.push({
-      playerId: selected[i],
-      runAt: addisTimestamp(registrationDate, 14, 30),
-      status: "pending"
-    });
-  }
-
-  // Exactly 13 at 4:25 PM
-  for (let i = 8; i < 21; i++) {
-    tasks.push({
-      playerId: selected[i],
-      runAt: addisTimestamp(registrationDate, 16, 25),
-      status: "pending"
-    });
-  }
-
-  // Remaining simulators at random times
-  for (let i = 21; i < dailyTotal; i++) {
-    const randomMinute = crypto.randomInt(0, 1440);
-
-    tasks.push({
-      playerId: selected[i],
-      runAt: addisTimestamp(
-        registrationDate,
-        Math.floor(randomMinute / 60),
-        randomMinute % 60
-      ),
-      status: "pending"
-    });
-  }
-
-  tasks.sort((a, b) => a.runAt - b.runAt);
-
-  return {
-    registrationDate,
-    tournamentDate,
-    dailyTotal,
-    createdAt: Date.now(),
-    tasks
-  };
+function isSimulatorAccount(account) {
+  return Boolean(
+    account &&
+    account.isSimulator === true &&
+    account.accountType === "simulator"
+  );
 }
 
-// Create or retrieve the daily schedule
-async function prepareDailySchedule() {
-  const registrationDate = getAddisDate();
-  const tournamentDate = getTomorrowDate();
+function makeEvenlySpacedTasks(playerIds, startAt, endAt, previousTasks = []) {
+  const previousById = new Map();
 
-  const scheduleRef = db.ref(
-    `simulatorSchedules/${registrationDate}`
-  );
-
-  const existing = await scheduleRef.once("value");
-
-  if (existing.exists()) {
-    return existing.val();
+  for (const task of previousTasks || []) {
+    if (task && task.playerId) previousById.set(String(task.playerId), task);
   }
 
-  // Check that tomorrow's tournament exists
-  const tournamentSnapshot = await db
-    .ref(`tournaments/${tournamentDate}`)
+  const orderedIds = shuffle(playerIds);
+  const duration = Math.max(0, endAt - startAt);
+  const tasks = [];
+
+  orderedIds.forEach((playerId, index) => {
+    const previous = previousById.get(String(playerId));
+    const runAt = startAt + Math.floor(
+      (index * duration) / Math.max(orderedIds.length, 1)
+    );
+
+    if (previous && previous.status === "completed") {
+      tasks.push(previous);
+      return;
+    }
+
+    tasks.push({
+      playerId: String(playerId),
+      runAt,
+      status: "pending",
+      attempts: Number(previous && previous.attempts) || 0,
+      nextAttemptAt: runAt,
+      lastError: previous && previous.lastError
+        ? previous.lastError
+        : null
+    });
+  });
+
+  return tasks;
+}
+
+async function getOpenTournament(tournamentDate) {
+  const snapshot = await db
+    .ref("tournaments/" + tournamentDate)
     .once("value");
 
-  if (!tournamentSnapshot.exists()) {
-    console.log("Tomorrow's tournament is not configured.");
-    return null;
-  }
+  if (!snapshot.exists()) return null;
 
-  const tournament = tournamentSnapshot.val();
+  const tournament = snapshot.val();
 
   if (
-    tournament.id !== tournamentDate ||
     tournament.tournamentDate !== tournamentDate ||
     tournament.registrationOpen !== true
   ) {
-    console.log("Tomorrow's tournament is not ready.");
     return null;
   }
 
   const entryFee = Number(tournament.entryFee || ENTRY_FEE);
   if (!Number.isFinite(entryFee) || entryFee <= 0) {
-    console.error("Tournament entry fee is invalid; simulator registrations are paused.");
-    return null;
+    throw new Error("Tournament entry fee is invalid.");
   }
 
-  const simulatorSnapshot = await db
-    .ref("simulators")
-    .once("value");
-
-  const simulators = simulatorSnapshot.val() || {};
-
-  const eligibleIds = Object.entries(simulators)
-    .filter(([id, account]) =>
-      account &&
-      account.isSimulator === true &&
-      account.accountType === "simulator" &&
-      Number.isFinite(Number(account.balance)) &&
-      Number(account.balance) >= entryFee &&
-      !(
-        account.simulatorRegistrations &&
-        account.simulatorRegistrations[tournamentDate]
-      )
-    )
-    .map(([id]) => id);
-
-  if (eligibleIds.length < MIN_SIMS) {
-    console.error(
-      `Only ${eligibleIds.length} funded and eligible simulators. At least ${MIN_SIMS} are required.`
-    );
-    return null;
-  }
-
-  const schedule = createDailySchedule(
-    registrationDate,
-    tournamentDate,
-    eligibleIds
-  );
-
-  const result = await scheduleRef.transaction((current) => {
-    if (current) return current;
-    return schedule;
-  });
-
-  console.log(
-    `Prepared ${result.snapshot.val().dailyTotal} simulator registrations for ${tournamentDate}.`
-  );
-
-  return result.snapshot.val();
+  return {
+    ...tournament,
+    entryFee
+  };
 }
 
-// Register one simulator using its own funded simulator account.
-async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE) {
-  const accountRef = db.ref(`simulators/${playerId}`);
-  const registeredAt = Date.now();
+async function prepareDailySchedule() {
+  const registrationDate = getAddisDate();
+  const tournamentDate = getTomorrowDate(registrationDate);
+  const tournament = await getOpenTournament(tournamentDate);
+
+  if (!tournament) {
+    console.log("Simulator scheduler is waiting for tomorrow's tournament registration to open.");
+    return null;
+  }
+
+  const simulatorSnapshot = await db.ref("simulators").once("value");
+  const simulatorAccounts = simulatorSnapshot.val() || {};
+
+  const simulatorIds = Object.entries(simulatorAccounts)
+    .filter(([, account]) => isSimulatorAccount(account))
+    .map(([playerId]) => String(playerId));
+
+  if (simulatorIds.length === 0) {
+    console.log("No existing simulator accounts were found. No accounts were created or changed.");
+    return null;
+  }
+
+  const scheduleRef = db.ref("simulatorSchedules/" + registrationDate);
+  const now = Date.now();
+  const dayEnd = Math.min(
+    getAddisDayEnd(registrationDate),
+    Number(tournament.registrationClosesAt) || getAddisDayEnd(registrationDate)
+  );
+
+  const transaction = await scheduleRef.transaction(current => {
+    if (
+      current &&
+      current.version === SCHEDULE_VERSION &&
+      current.tournamentDate === tournamentDate
+    ) {
+      const existingIds = new Set(
+        (current.tasks || []).map(task => String(task.playerId))
+      );
+      const missingIds = simulatorIds.filter(id => !existingIds.has(id));
+
+      if (missingIds.length === 0) return current;
+
+      const remainingStart = Math.max(now, getAddisDayStart(registrationDate));
+      const additions = makeEvenlySpacedTasks(
+        missingIds,
+        remainingStart,
+        dayEnd
+      );
+
+      return {
+        ...current,
+        tasks: [...(current.tasks || []), ...additions],
+        totalSimulators: existingIds.size + missingIds.length,
+        updatedAt: now
+      };
+    }
+
+    const previousTasks = current && current.tournamentDate === tournamentDate
+      ? current.tasks || []
+      : [];
+
+    const startAt = Math.max(now, getAddisDayStart(registrationDate));
+    const tasks = makeEvenlySpacedTasks(
+      simulatorIds,
+      startAt,
+      dayEnd,
+      previousTasks
+    );
+
+    return {
+      version: SCHEDULE_VERSION,
+      registrationDate,
+      tournamentDate,
+      totalSimulators: simulatorIds.length,
+      createdAt: current && current.createdAt
+        ? current.createdAt
+        : now,
+      updatedAt: now,
+      tasks
+    };
+  });
+
+  const schedule = transaction.snapshot.val();
+
+  if (!schedule) return null;
+
+  console.log(
+    "Simulator schedule ready for " +
+    tournamentDate +
+    ": " +
+    schedule.totalSimulators +
+    " existing simulator accounts."
+  );
+
+  return schedule;
+}
+
+function isMatchingSimulatorRegistration(registration, playerId) {
+  return Boolean(
+    registration &&
+    registration.isSimulator === true &&
+    String(registration.playerId || registration.telegramId) === String(playerId)
+  );
+}
+
+async function removeUnpaidReservation(registrationRef, playerId) {
+  await registrationRef.transaction(current => {
+    if (
+      current &&
+      current.status === "processing" &&
+      current.isSimulator === true &&
+      String(current.playerId || current.telegramId) === String(playerId)
+    ) {
+      return null;
+    }
+    return current;
+  });
+}
+
+async function registerSimulator(playerId, tournamentDate, entryFee) {
   const fee = Number(entryFee);
+  const id = String(playerId);
 
   if (!Number.isFinite(fee) || fee <= 0) {
     throw new Error("Invalid simulator entry fee.");
   }
 
-  const tournamentRegistrationRef = db.ref(
-    `tournaments/${tournamentDate}/registrations/${playerId}`
-  );
+  const accountRef = db.ref("simulators/" + id);
+  const tournamentRef = db.ref("tournaments/" + tournamentDate);
+  const registrationRef = tournamentRef.child("registrations/" + id);
+  const transactionId = "sim_entry_" + tournamentDate + "_" + id;
+  const registeredAt = Date.now();
 
-  const reservation = await tournamentRegistrationRef.transaction(existing => {
-    if (existing) return existing;
-    return {
-      telegramId: String(playerId),
-      playerId: String(playerId),
-      tournamentId: tournamentDate,
-      entryFee: fee,
-      registeredAt,
-      status: "processing",
-      isSimulator: true
-    };
+  const initialTournamentSnapshot = await tournamentRef.once("value");
+  const initialTournament = initialTournamentSnapshot.val();
+
+  if (!initialTournament || initialTournament.registrationOpen !== true) {
+    return { status: "registration_closed" };
+  }
+
+  const existingRegistrationSnapshot = await registrationRef.once("value");
+  const existingRegistration = existingRegistrationSnapshot.val();
+
+  if (existingRegistration && existingRegistration.status === "registered") {
+    if (!isMatchingSimulatorRegistration(existingRegistration, id)) {
+      throw new Error("A non-simulator registration already uses this player ID.");
+    }
+    return { status: "already_registered" };
+  }
+
+  const reservation = await registrationRef.transaction(current => {
+    if (!current) {
+      return {
+        telegramId: id,
+        playerId: id,
+        tournamentId: tournamentDate,
+        tournamentDate,
+        entryFee: fee,
+        registeredAt,
+        status: "processing",
+        isSimulator: true,
+        displayName: null
+      };
+    }
+
+    if (
+      isMatchingSimulatorRegistration(current, id) &&
+      (current.status === "processing" || current.status === "registered")
+    ) {
+      return current;
+    }
+
+    return;
   });
 
   const reserved = reservation.snapshot.val();
-  if (!reserved || reserved.isSimulator !== true ||
-      String(reserved.telegramId) !== String(playerId)) {
-    throw new Error("A different registration already uses this player ID.");
+
+  if (!reserved || !isMatchingSimulatorRegistration(reserved, id)) {
+    throw new Error("Could not safely reserve this simulator registration.");
   }
-  if (reserved.status === "registered") return true;
 
-  const simulatorTransactionId = `sim_entry_${tournamentDate}_${playerId}`;
+  if (reserved.status === "registered") {
+    return { status: "already_registered" };
+  }
 
-  // Debit the simulator's own balance once per tournament.
+  const accountSnapshot = await accountRef.once("value");
+  const accountBeforeCharge = accountSnapshot.val();
+
+  if (!isSimulatorAccount(accountBeforeCharge)) {
+    await removeUnpaidReservation(registrationRef, id);
+    throw new Error("Simulator account is missing or has invalid account flags.");
+  }
+
+  const existingPayment =
+    accountBeforeCharge.simulatorTransactions &&
+    accountBeforeCharge.simulatorTransactions[transactionId];
+
+  const existingSimulatorRegistration =
+    accountBeforeCharge.simulatorRegistrations &&
+    accountBeforeCharge.simulatorRegistrations[tournamentDate];
+
+  if (
+    existingPayment &&
+    (
+      existingPayment.type !== "simulator_entry_fee" ||
+      Number(existingPayment.amount) !== fee ||
+      existingPayment.status !== "completed"
+    )
+  ) {
+    throw new Error("An existing simulator transaction has conflicting details.");
+  }
+
+  const legacyPaymentAlreadyRecorded = Boolean(
+    existingSimulatorRegistration &&
+    existingSimulatorRegistration.status === "registered" &&
+    existingSimulatorRegistration.paymentSource === "simulator_wallet" &&
+    Number(existingSimulatorRegistration.entryFee) === fee
+  );
+
+  if (!existingPayment && !legacyPaymentAlreadyRecorded) {
+    const latestTournamentSnapshot = await tournamentRef.once("value");
+    const latestTournament = latestTournamentSnapshot.val();
+    const closesAt = Number(latestTournament && latestTournament.registrationClosesAt);
+
+    if (
+      !latestTournament ||
+      latestTournament.registrationOpen !== true ||
+      (Number.isFinite(closesAt) && closesAt > 0 && Date.now() >= closesAt)
+    ) {
+      await removeUnpaidReservation(registrationRef, id);
+      return { status: "registration_closed" };
+    }
+  }
+
   const charge = await accountRef.transaction(account => {
-    if (!account || account.isSimulator !== true ||
-        account.accountType !== "simulator") return;
+    if (!isSimulatorAccount(account)) return;
 
     account.simulatorTransactions = account.simulatorTransactions || {};
-    const prior = account.simulatorTransactions[simulatorTransactionId];
+    const prior = account.simulatorTransactions[transactionId];
 
     if (prior) {
-      if (prior.type === "simulator_entry_fee" &&
-          Number(prior.amount) === fee &&
-          prior.status === "completed") return account;
+      if (
+        prior.type === "simulator_entry_fee" &&
+        Number(prior.amount) === fee &&
+        prior.status === "completed"
+      ) {
+        return account;
+      }
       return;
+    }
+
+    account.simulatorRegistrations = account.simulatorRegistrations || {};
+    const oldRegistration = account.simulatorRegistrations[tournamentDate];
+
+    if (
+      oldRegistration &&
+      oldRegistration.status === "registered" &&
+      oldRegistration.paymentSource === "simulator_wallet" &&
+      Number(oldRegistration.entryFee) === fee
+    ) {
+      account.simulatorTransactions[transactionId] = {
+        type: "simulator_entry_fee",
+        amount: fee,
+        tournamentDate,
+        status: "completed",
+        recoveredFromExistingRegistration: true,
+        createdAt: oldRegistration.registeredAt || Date.now()
+      };
+      return account;
     }
 
     const balance = Number(account.balance);
     if (!Number.isFinite(balance) || balance < fee) return;
 
     account.balance = balance - fee;
-    account.simulatorTransactions[simulatorTransactionId] = {
+    account.simulatorTransactions[transactionId] = {
       type: "simulator_entry_fee",
       amount: fee,
       tournamentDate,
@@ -272,23 +410,39 @@ async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE)
   });
 
   let account = charge.snapshot.val();
-  const debit = account?.simulatorTransactions?.[simulatorTransactionId];
+  let payment = account &&
+    account.simulatorTransactions &&
+    account.simulatorTransactions[transactionId];
 
-  if (!debit || debit.type !== "simulator_entry_fee" ||
-      Number(debit.amount) !== fee || debit.status !== "completed") {
-    await tournamentRegistrationRef.transaction(current => {
-      if (current && current.status === "processing" &&
-          current.isSimulator === true &&
-          String(current.telegramId) === String(playerId)) return null;
-      return current;
-    });
-    throw new Error("Simulator has insufficient balance or its entry debit failed.");
+  if (!payment) {
+    await removeUnpaidReservation(registrationRef, id);
+    return { status: "insufficient_funds" };
   }
 
-  const saved = await accountRef.transaction(current => {
-    if (!current || current.isSimulator !== true) return;
+  if (
+    payment.type !== "simulator_entry_fee" ||
+    Number(payment.amount) !== fee ||
+    payment.status !== "completed"
+  ) {
+    throw new Error("Simulator wallet transaction could not be verified.");
+  }
+
+  const accountRegistration = await accountRef.transaction(current => {
+    if (!isSimulatorAccount(current)) return;
+
     current.simulatorRegistrations = current.simulatorRegistrations || {};
-    if (current.simulatorRegistrations[tournamentDate]) return current;
+    const existing = current.simulatorRegistrations[tournamentDate];
+
+    if (existing) {
+      if (
+        existing.status === "registered" &&
+        Number(existing.entryFee) === fee &&
+        existing.paymentSource === "simulator_wallet"
+      ) {
+        return current;
+      }
+      return;
+    }
 
     current.simulatorRegistrations[tournamentDate] = {
       tournamentDate,
@@ -296,151 +450,327 @@ async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE)
       registeredAt,
       status: "registered",
       paymentSource: "simulator_wallet",
-      simulatorTransactionId
+      simulatorTransactionId: transactionId
     };
+
     return current;
   });
 
-  account = saved.snapshot.val();
-  const registration = account?.simulatorRegistrations?.[tournamentDate];
+  account = accountRegistration.snapshot.val();
+  const savedSimulatorRegistration =
+    account &&
+    account.simulatorRegistrations &&
+    account.simulatorRegistrations[tournamentDate];
 
-  if (!registration) {
-    throw new Error("Simulator entry was charged, but registration needs recovery.");
+  if (
+    !savedSimulatorRegistration ||
+    savedSimulatorRegistration.status !== "registered" ||
+    Number(savedSimulatorRegistration.entryFee) !== fee
+  ) {
+    throw new Error("Payment is saved; simulator registration recovery is required.");
   }
 
-  const finalized = await tournamentRegistrationRef.transaction(current => {
-    if (!current || current.isSimulator !== true ||
-        String(current.telegramId) !== String(playerId)) return;
+  const finalized = await registrationRef.transaction(current => {
+    if (!isMatchingSimulatorRegistration(current, id)) return;
     current.status = "registered";
     current.entryFee = fee;
-    current.registeredAt = registration.registeredAt || registeredAt;
+    current.registeredAt =
+      savedSimulatorRegistration.registeredAt || registeredAt;
     current.completedAt = Date.now();
     current.paymentSource = "simulator_wallet";
-    current.simulatorTransactionId = registration.simulatorTransactionId || simulatorTransactionId;
+    current.simulatorTransactionId =
+      savedSimulatorRegistration.simulatorTransactionId || transactionId;
+    current.displayName =
+      account.displayName || account.username || id;
+    current.username = account.username || account.displayName || id;
     return current;
   });
 
-  const mainRegistration = finalized.snapshot.val();
-  if (!mainRegistration || mainRegistration.status !== "registered") {
-    throw new Error("Simulator entry was charged, but registration finalization needs recovery.");
+  const finalRegistration = finalized.snapshot.val();
+
+  if (
+    !finalRegistration ||
+    finalRegistration.status !== "registered" ||
+    !isMatchingSimulatorRegistration(finalRegistration, id)
+  ) {
+    throw new Error("Payment is saved; tournament registration recovery is required.");
   }
 
-  const registrationRef = db.ref(
-    `simulatorTournaments/${tournamentDate}/registrations/${playerId}`
+  const mirrorRef = db.ref(
+    "simulatorTournaments/" + tournamentDate + "/registrations/" + id
   );
-  await registrationRef.transaction(existing => existing || ({
-    playerId,
-    username: account.username || account.displayName || playerId,
-    tournamentDate,
-    entryFee: fee,
-    registeredAt: registration.registeredAt || registeredAt,
-    paymentSource: "simulator_wallet",
-    simulatorTransactionId: registration.simulatorTransactionId || simulatorTransactionId,
-    status: "registered"
-  }));
 
-  return true;
+  await mirrorRef.transaction(existing => {
+    if (existing && existing.status === "registered") return existing;
+
+    return {
+      playerId: id,
+      username: account.username || account.displayName || id,
+      displayName: account.displayName || account.username || id,
+      tournamentDate,
+      entryFee: fee,
+      registeredAt: finalRegistration.registeredAt,
+      paymentSource: "simulator_wallet",
+      simulatorTransactionId: transactionId,
+      status: "registered"
+    };
+  });
+
+  return { status: "registered" };
 }
 
-// Process due simulator registrations
+async function claimTask(taskRef, now) {
+  const claimId = crypto.randomUUID();
+
+  const result = await taskRef.transaction(current => {
+    if (!current) return;
+
+    const status = current.status || "pending";
+    const nextAttemptAt = Number(current.nextAttemptAt || current.runAt || 0);
+
+    if (status === "completed") return;
+    if (status === "processing") {
+      const claimedAt = Number(current.claimedAt || 0);
+      if (now - claimedAt < PROCESSING_LEASE) return;
+    } else if (
+      status !== "pending" &&
+      status !== "skipped_insufficient_funds" &&
+      status !== "failed"
+    ) {
+      return;
+    } else if (nextAttemptAt > now) {
+      return;
+    }
+
+    current.status = "processing";
+    current.claimId = claimId;
+    current.claimedAt = now;
+    current.attempts = (Number(current.attempts) || 0) + 1;
+    current.lastAttemptAt = now;
+
+    return current;
+  });
+
+  if (!result.committed) return null;
+
+  return {
+    claimId,
+    task: result.snapshot.val()
+  };
+}
+
+async function finishTask(taskRef, claimId, updates) {
+  await taskRef.transaction(current => {
+    if (!current || current.claimId !== claimId) return;
+
+    Object.assign(current, updates);
+    delete current.claimId;
+    delete current.claimedAt;
+
+    return current;
+  });
+}
+
+async function updateReportEntry(tournamentDate, playerId, task) {
+  const reportRef = db.ref(
+    "simulatorRegistrationReports/" +
+    tournamentDate +
+    "/simulators/" +
+    playerId
+  );
+
+  await reportRef.set({
+    playerId: String(playerId),
+    status: task.status,
+    attempts: Number(task.attempts) || 0,
+    entryFee: task.entryFee || null,
+    runAt: task.runAt || null,
+    nextAttemptAt: task.nextAttemptAt || null,
+    lastAttemptAt: task.lastAttemptAt || null,
+    completedAt: task.completedAt || null,
+    lastError: task.lastError || null,
+    updatedAt: Date.now()
+  });
+}
+
+async function rebuildDailyReport(schedule, tournament) {
+  const counts = {
+    total: 0,
+    registered: 0,
+    skipped: 0,
+    pending: 0,
+    failed: 0,
+    processing: 0
+  };
+
+  for (const task of schedule.tasks || []) {
+    if (!task) continue;
+    counts.total++;
+
+    if (task.status === "completed") counts.registered++;
+    else if (task.status === "skipped_insufficient_funds") counts.skipped++;
+    else if (task.status === "failed") counts.failed++;
+    else if (task.status === "processing") counts.processing++;
+    else counts.pending++;
+  }
+
+  await db.ref(
+    "simulatorRegistrationReports/" + schedule.tournamentDate
+  ).update({
+    registrationDate: schedule.registrationDate,
+    tournamentDate: schedule.tournamentDate,
+    entryFee: Number(tournament.entryFee || ENTRY_FEE),
+    checkIntervalSeconds: CHECK_INTERVAL / 1000,
+    totalSimulators: counts.total,
+    registered: counts.registered,
+    skippedForInsufficientFunds: counts.skipped,
+    pending: counts.pending,
+    failed: counts.failed,
+    processing: counts.processing,
+    registrationOpen: tournament.registrationOpen === true,
+    updatedAt: Date.now()
+  });
+}
+
 async function processDueRegistrations() {
   try {
     const registrationDate = getAddisDate();
+    const tournamentDate = getTomorrowDate(registrationDate);
 
-    const scheduleRef = db.ref(
-      `simulatorSchedules/${registrationDate}`
-    );
+    let scheduleSnapshot = await db
+      .ref("simulatorSchedules/" + registrationDate)
+      .once("value");
 
-    let snapshot = await scheduleRef.once("value");
-
-    if (!snapshot.exists()) {
+    if (!scheduleSnapshot.exists()) {
       const prepared = await prepareDailySchedule();
       if (!prepared) return;
 
-      snapshot = await scheduleRef.once("value");
+      scheduleSnapshot = await db
+        .ref("simulatorSchedules/" + registrationDate)
+        .once("value");
     }
 
-    const schedule = snapshot.val();
-    if (!schedule) return;
+    const schedule = scheduleSnapshot.val();
+    if (!schedule || schedule.tournamentDate !== tournamentDate) return;
 
-    const tournamentSnapshot = await db
-      .ref(`tournaments/${schedule.tournamentDate}`)
-      .once("value");
+    const tournament = await getOpenTournament(tournamentDate);
 
-    if (!tournamentSnapshot.exists()) return;
+    if (!tournament) {
+      const tournamentSnapshot = await db
+        .ref("tournaments/" + tournamentDate)
+        .once("value");
+      const closedTournament = tournamentSnapshot.val();
 
-    const tournament = tournamentSnapshot.val();
-
-    if (tournament.registrationOpen !== true) return;
+      if (closedTournament) {
+        await rebuildDailyReport(schedule, {
+          ...closedTournament,
+          registrationOpen: false
+        });
+      }
+      return;
+    }
 
     const now = Date.now();
+    const closingAt = Number(tournament.registrationClosesAt) ||
+      getAddisDayEnd(registrationDate);
 
-    const closingTime = addisTimestamp(
-      registrationDate,
-      24,
-      0
-    );
+    if (now >= closingAt) {
+      await rebuildDailyReport(schedule, {
+        ...tournament,
+        registrationOpen: false
+      });
+      return;
+    }
 
-    if (now >= closingTime) return;
+    for (let index = 0; index < (schedule.tasks || []).length; index++) {
+      const task = schedule.tasks[index];
+      if (!task || Number(task.runAt) > now) continue;
 
-    for (let i = 0; i < schedule.tasks.length; i++) {
-      const task = schedule.tasks[i];
-
+      const status = task.status || "pending";
+      if (status === "completed") continue;
       if (
-        task.status !== "pending" ||
-        task.runAt > now
+        status !== "processing" &&
+        Number(task.nextAttemptAt || task.runAt || 0) > now
       ) {
         continue;
       }
 
-      const taskRef = scheduleRef.child(`tasks/${i}`);
+      const taskRef = db.ref(
+        "simulatorSchedules/" + registrationDate + "/tasks/" + index
+      );
 
-      // Claim the task to avoid duplicate processing
-      const claim = await taskRef.transaction((current) => {
-        if (!current || current.status !== "pending") {
-          return;
-        }
+      const claim = await claimTask(taskRef, now);
+      if (!claim) continue;
 
-        current.status = "processing";
-        current.claimedAt = Date.now();
-
-        return current;
-      });
-
-      if (!claim.committed) continue;
+      const playerId = String(claim.task.playerId);
 
       try {
-        await registerSimulator(
-          task.playerId,
-          schedule.tournamentDate,
-          Number(tournament.entryFee || ENTRY_FEE)
+        const result = await registerSimulator(
+          playerId,
+          tournamentDate,
+          tournament.entryFee
         );
 
-        await taskRef.update({
-          status: "completed",
-          completedAt: Date.now()
-        });
-
-        console.log(
-          `Simulator registration completed: ${task.playerId}`
-        );
+        if (
+          result.status === "registered" ||
+          result.status === "already_registered"
+        ) {
+          await finishTask(taskRef, claim.claimId, {
+            status: "completed",
+            entryFee: tournament.entryFee,
+            completedAt: Date.now(),
+            lastError: null
+          });
+        } else if (result.status === "insufficient_funds") {
+          await finishTask(taskRef, claim.claimId, {
+            status: "skipped_insufficient_funds",
+            entryFee: tournament.entryFee,
+            nextAttemptAt: Date.now() + CHECK_INTERVAL,
+            lastError: null
+          });
+        } else if (result.status === "registration_closed") {
+          await finishTask(taskRef, claim.claimId, {
+            status: "pending",
+            nextAttemptAt: closingAt,
+            lastError: "Waiting for an open registration window."
+          });
+        }
 
       } catch (error) {
         console.error(
-          `Registration failed for ${task.playerId}:`,
+          "Simulator registration attempt failed for " +
+          playerId +
+          ": " +
           error.message
         );
 
-        await taskRef.update({
+        await finishTask(taskRef, claim.claimId, {
           status: "failed",
-          error: error.message,
-          failedAt: Date.now()
+          nextAttemptAt: Date.now() + CHECK_INTERVAL,
+          lastError: String(error.message || error).slice(0, 500)
         });
+      }
+
+      const latestTask = await taskRef.once("value");
+      if (latestTask.exists()) {
+        await updateReportEntry(
+          tournamentDate,
+          playerId,
+          latestTask.val()
+        );
       }
     }
 
+    const latestSchedule = await db
+      .ref("simulatorSchedules/" + registrationDate)
+      .once("value");
+
+    if (latestSchedule.exists()) {
+      await rebuildDailyReport(latestSchedule.val(), tournament);
+    }
+
   } catch (error) {
-    console.error("Simulator scheduler error:", error);
+    console.error("Simulator scheduler cycle failed:", error);
   }
 }
 
@@ -448,19 +778,25 @@ function startSimulatorScheduler() {
   if (schedulerStarted) return;
 
   schedulerStarted = true;
-
-  console.log("Simulator registration scheduler started.");
+  console.log(
+    "Simulator registration scheduler started. It checks every 5 minutes."
+  );
 
   processDueRegistrations();
 
-  setInterval(
+  schedulerTimer = setInterval(
     processDueRegistrations,
     CHECK_INTERVAL
   );
+
+  if (schedulerTimer && typeof schedulerTimer.unref === "function") {
+    schedulerTimer.unref();
+  }
 }
 
 module.exports = {
   startSimulatorScheduler,
   prepareDailySchedule,
-  processDueRegistrations
+  processDueRegistrations,
+  registerSimulator
 };
