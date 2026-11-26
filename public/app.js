@@ -400,6 +400,7 @@ async function openGameRoom() {
 
   const room = document.getElementById("gameRoom");
   room.hidden = false;
+  document.querySelector(".app").classList.add("game-active");
 
   await refreshGameRoom();
 
@@ -663,6 +664,7 @@ function leaveGameRoom() {
 
   const room = document.getElementById("gameRoom");
   room.hidden = true;
+  document.querySelector(".app").classList.remove("game-active");
 
   tabContent.style.display = "block";
   loadMyMatch();
