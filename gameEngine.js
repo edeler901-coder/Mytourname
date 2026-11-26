@@ -1,11 +1,8 @@
 
-const { db } = require("./firebase");
 const {
   TOTAL_BOARDS,
-  ensureBoardCatalog,
-  getBoardByNumber
+  ensureBoardCatalog
 } = require("./boardCatalog");
-
 // =====================================
 // BINGO CHAMPIONS - GAME ENGINE
 // =====================================
@@ -27,6 +24,19 @@ async function initializeCatalog() {
   }
 
   return catalogPromise;
+}
+async function getPermanentBoard(boardNumber) {
+  const snapshot = await db.ref(
+    `gameConfig/boardCatalog/${boardNumber}`
+  ).once("value");
+
+  const board = snapshot.val();
+
+  if (!board || !board.card) {
+    throw new Error(`Permanent board ${boardNumber} not found.`);
+  }
+
+  return board;
 }
 
 function generateNumberPool() {
@@ -341,7 +351,7 @@ async function getPlayerCard(
     throw new Error("You have not selected a board.");
   }
 
-  const permanentBoard = await getBoardByNumber(boardNumber);
+  const permanentBoard = await getPermanentBoard(boardNumber);
 
   return {
     boardNumber: permanentBoard.boardNumber,
@@ -535,7 +545,7 @@ async function verifyBingo(
     };
   }
 
-  const permanentBoard = await getBoardByNumber(boardNumber);
+  const permanentBoard = await getPermanentBoard(boardNumber);
 
   const valid = hasWinningPattern(
     permanentBoard.card,
