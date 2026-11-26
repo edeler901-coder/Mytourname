@@ -263,17 +263,20 @@ bot.on("message", async msg => {
       const transferId = crypto.randomUUID();
       const sender = playerRef(id);
       const debit = await sender.transaction(p => {
-        if (!p || !Number.isFinite(p.balance) || p.balance < amount) return;
-        p.balance -= amount;
+        if (!p) return;
         p.transactions = p.transactions || {};
+        if (p.transactions[transferId]) return p;
+        if (!Number.isFinite(p.balance) || p.balance < amount) return;
+        p.balance -= amount;
         p.transactions[transferId] = { type: "transfer_sent", amount, to: s.recipientId, status: "completed", createdAt: Date.now() };
         return p;
       });
       if (!debit.committed) return bot.sendMessage(msg.chat.id, "Transfer failed. Check your balance.");
       const credit = await playerRef(s.recipientId).transaction(p => {
-        if (!p) return p;
-        p.balance = Number(p.balance || 0) + amount;
+        if (!p) return;
         p.transactions = p.transactions || {};
+        if (p.transactions[transferId]) return p;
+        p.balance = Number(p.balance || 0) + amount;
         p.transactions[transferId] = { type: "transfer_received", amount, from: id, status: "completed", createdAt: Date.now() };
         return p;
       });
