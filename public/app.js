@@ -241,9 +241,12 @@ async function loadAssignment() {
 
 loadAssignment();
 
+
 // ===================================
 // MY MATCHES - LOAD PLAYER MATCH
 // ===================================
+
+let gameRoomPoll = null;
 
 async function loadMyMatch() {
   if (!tg || !tg.initData) {
@@ -260,14 +263,11 @@ async function loadMyMatch() {
   `;
 
   try {
-    const response = await fetch(
-      `${API_URL}/api/player/match`,
-      {
-        headers: {
-          "X-Telegram-Init-Data": tg.initData
-        }
+    const response = await fetch(`${API_URL}/api/player/match`, {
+      headers: {
+        "X-Telegram-Init-Data": tg.initData
       }
-    );
+    });
 
     const result = await response.json();
 
@@ -305,14 +305,12 @@ async function loadMyMatch() {
         <p>GROUP ${match.groupNumber}</p>
         <h2>Match ${match.matchId}</h2>
         <p>Scheduled time: ${matchTime}</p>
-        <p>Status: ${match.status.replace("_", " ").toUpperCase()}</p>
+        <p>Status: ${match.status.replaceAll("_", " ").toUpperCase()}</p>
         <p>Players: ${match.playerCount}</p>
 
-        <button
-          id="enterMatchBtn"
+        <button id="enterMatchBtn"
           ${canEnter ? "" : "disabled"}
-          style="width:100%;margin-top:15px;"
-        >
+          style="width:100%;margin-top:15px;">
           ${canEnter ? "PLAY MATCH" : "WAIT FOR MATCH TIME"}
         </button>
       </div>
@@ -321,21 +319,7 @@ async function loadMyMatch() {
     const enterButton = document.getElementById("enterMatchBtn");
 
     if (canEnter) {
-      enterButton.addEventListener("click", () => {
-        homeSections.forEach(section => {
-          section.style.display = "none";
-        });
-
-        tabContent.style.display = "none";
-        document.getElementById("gameRoom").hidden = false;
-
-        document.getElementById("selectionScreen").hidden =
-          match.status !== "board_selection";
-
-        document.getElementById("liveGameScreen").hidden =
-          match.status !== "in_progress" &&
-          match.status !== "completed";
-      });
+      enterButton.addEventListener("click", openGameRoom);
     }
 
   } catch (error) {
@@ -345,5 +329,251 @@ async function loadMyMatch() {
       <h2>MY MATCHES</h2>
       <p>${error.message}</p>
     `;
+  }
+}
+
+// ===================================
+// OPEN GAME ROOM
+// ===================================
+
+async function openGameRoom() {
+  if (gameRoomPoll) {
+    clearInterval(gameRoomPoll);
+  }
+
+  homeSections.forEach(section => {
+    section.style.display = "none";
+  });
+
+  tabContent.style.display = "none";
+
+  const room = document.getElementById("gameRoom");
+  room.hidden = false;
+
+  await refreshGameRoom();
+
+  gameRoomPoll = setInterval(refreshGameRoom, 1000);
+}
+
+// ===================================
+// REFRESH GAME ROOM
+// ===================================
+
+async function refreshGameRoom() {
+  try {
+    const response = await fetch(`${API_URL}/api/player/match`, {
+      headers: {
+        "X-Telegram-Init-Data": tg.initData
+      }
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.ready) {
+      throw new Error(result.error || "Match unavailable.");
+    }
+
+    const match = result.match;
+    const selection = result.selection;
+    const card = result.card;
+
+    document.getElementById("gameId").textContent = match.matchId;
+    document.getElementById("gamePlayers").textContent = match.playerCount;
+    document.getElementById("callsCount").textContent =
+      (match.drawnNumbers || []).length;
+
+    const selectionScreen = document.getElementById("selectionScreen");
+    const liveScreen = document.getElementById("liveGameScreen");
+
+    if (match.status === "board_selection") {
+      selectionScreen.hidden = false;
+      liveScreen.hidden = true;
+
+      renderBoardChoices(selection);
+      updateSelectionCountdown(selection.selectionEndsAt);
+
+    } else if (
+      match.status === "in_progress" ||
+      match.status === "completed"
+    ) {
+      selectionScreen.hidden = true;
+      liveScreen.hidden = false;
+
+      if (card) {
+        renderPlayerCard(card, match.drawnNumbers || []);
+      }
+
+      renderCalledNumbers(match.drawnNumbers || []);
+
+      const lastCall = match.lastCalledNumber;
+
+      document.getElementById("latestCall").textContent =
+        lastCall ? `${lastCall.letter}-${lastCall.number}` : "—";
+
+      document.getElementById("gameCountdown").textContent =
+        match.status === "completed" ? "FINISHED" : "LIVE";
+
+      if (match.status === "completed") {
+        document.getElementById("bingoBtn").disabled = true;
+        document.getElementById("bingoBtn").textContent = "MATCH FINISHED";
+        clearInterval(gameRoomPoll);
+      }
+    }
+
+  } catch (error) {
+    console.error("Game room refresh error:", error);
+  }
+}
+
+// ===================================
+// BOARD SELECTION
+// ===================================
+
+function renderBoardChoices(selection) {
+  const container = document.getElementById("boardChoices");
+
+  if (!selection || !selection.availableBoards) return;
+
+  container.innerHTML = "";
+
+  document.getElementById("selectionMessage").textContent =
+    selection.selectedBoardNumber
+      ? `Your selected board: ${selection.selectedBoardNumber}. You can change it before time expires.`
+      : "Choose one available board. Each board can be selected by only one player.";
+
+  selection.availableBoards.forEach(board => {
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "board-choice";
+
+    if (!board.available) {
+      button.classList.add("unavailable");
+      button.disabled = true;
+    }
+
+    if (Number(selection.selectedBoardNumber) === board.boardNumber) {
+      button.classList.add("selected");
+    }
+
+    button.textContent = board.boardNumber;
+
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+
+      try {
+        const response = await fetch(`${API_URL}/api/player/select-board`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Telegram-Init-Data": tg.initData
+          },
+          body: JSON.stringify({
+            boardNumber: board.boardNumber
+          })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || "Board selection failed.");
+        }
+
+        await refreshGameRoom();
+
+      } catch (error) {
+        alert(error.message);
+        await refreshGameRoom();
+      }
+    });
+
+    container.appendChild(button);
+  });
+}
+
+// ===================================
+// SHARED SELECTION COUNTDOWN
+// ===================================
+
+function updateSelectionCountdown(endsAt) {
+  const timer = document.getElementById("selectionTimer");
+
+  if (!endsAt) {
+    timer.textContent = "00:00";
+    return;
+  }
+
+  const remaining = Math.max(0, Number(endsAt) - Date.now());
+
+  const seconds = Math.ceil(remaining / 1000);
+  const minutesText = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const secondsText = String(seconds % 60).padStart(2, "0");
+
+  timer.textContent = `${minutesText}:${secondsText}`;
+
+  if (remaining <= 0) {
+    document.getElementById("selectionMessage").textContent =
+      "Selection closed. Starting your match...";
+  }
+}
+
+// ===================================
+// RENDER PERMANENT PLAYER CARD
+// ===================================
+
+function renderPlayerCard(playerCard, drawnNumbers) {
+  const grid = document.getElementById("playerCardGrid");
+  const card = playerCard.card;
+
+  if (!card) return;
+
+  document.getElementById("playerBoardNumber").textContent =
+    playerCard.boardNumber;
+
+  const called = new Set(drawnNumbers);
+
+  grid.innerHTML = "";
+
+  ["B", "I", "N", "G", "O"].forEach(letter => {
+    card[letter].forEach(number => {
+      const cell = document.createElement("div");
+      cell.className = "player-cell";
+
+      if (number === 0) {
+        cell.textContent = "FREE";
+        cell.classList.add("free", "marked");
+      } else {
+        cell.textContent = number;
+
+        if (called.has(number)) {
+          cell.classList.add("marked");
+        }
+      }
+
+      grid.appendChild(cell);
+    });
+  });
+}
+
+// ===================================
+// RENDER CALLED NUMBERS
+// ===================================
+
+function renderCalledNumbers(drawnNumbers) {
+  const board = document.getElementById("calledNumbersBoard");
+
+  board.innerHTML = "";
+
+  for (let number = 1; number <= 75; number++) {
+    const cell = document.createElement("div");
+
+    cell.className = "called-number";
+
+    if (drawnNumbers.includes(number)) {
+      cell.classList.add("called");
+    }
+
+    cell.textContent = number;
+    board.appendChild(cell);
   }
 }
