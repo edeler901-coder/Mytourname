@@ -88,19 +88,23 @@ async function registerPlayerForTournament(telegramId, tournament) {
   const result = await playerRef.transaction((player) => {
     if (!player) return;
 
-    if (!Number.isFinite(player.balance)) return;
+    // Accept numeric balances stored as either numbers or numeric strings,
+    // then persist the debited balance as a number.
+    const balance = Number(player.balance);
+    if (!Number.isFinite(balance)) return;
 
     if (!player.tournamentRegistrations) {
       player.tournamentRegistrations = {};
     }
 
+    // An existing registration is returned unchanged: never charge twice.
     if (player.tournamentRegistrations[tournamentId]) {
       return player;
     }
 
-    if (player.balance < entryFee) return;
+    if (balance < entryFee) return;
 
-    player.balance -= entryFee;
+    player.balance = balance - entryFee;
 
     player.tournamentRegistrations[tournamentId] = {
       tournamentId,
@@ -118,8 +122,24 @@ async function registerPlayerForTournament(telegramId, tournament) {
   const registration =
     player?.tournamentRegistrations?.[tournamentId];
 
+  if (!player) {
+    throw new Error("Player account was not found. No entry fee was charged.");
+  }
+
   if (!registration) {
-    throw new Error("Insufficient balance or registration failed.");
+    const availableBalance = Number(player.balance);
+
+    if (!Number.isFinite(availableBalance)) {
+      throw new Error("Your wallet balance is invalid. No entry fee was charged.");
+    }
+
+    if (availableBalance < entryFee) {
+      throw new Error(
+        `Insufficient balance. Entry fee: ${entryFee} Br; available balance: ${availableBalance} Br. No entry fee was charged.`
+      );
+    }
+
+    throw new Error("Registration transaction did not complete. No entry fee was charged.");
   }
 
   const alreadyRegistered =
