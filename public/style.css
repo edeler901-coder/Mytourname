@@ -784,3 +784,285 @@ body {
     font-size: 10px;
   }
 }
+/* ================================
+   BINGO CHAMPIONS GAME ROOM
+================================ */
+
+.game-room {
+  padding: 10px 0 110px;
+}
+
+.game-info-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  align-items: center;
+  gap: 5px;
+  background: #211438;
+  border: 1px solid #49345f;
+  border-radius: 12px;
+  padding: 12px 8px;
+  font-size: 9px;
+  color: #a99dbd;
+  font-weight: 800;
+}
+
+.game-info-bar strong {
+  display: block;
+  color: #f5ca70;
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.game-info-bar button {
+  border: 0;
+  background: #38234f;
+  border-radius: 9px;
+  padding: 8px;
+  color: white;
+  font-size: 17px;
+}
+
+#selectionScreen {
+  margin-top: 20px;
+  text-align: center;
+}
+
+#selectionScreen h2 {
+  color: #f5ca70;
+  font-size: 19px;
+  margin-bottom: 10px;
+}
+
+#selectionMessage {
+  color: #a99dbd;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#selectionTimer {
+  color: #f5ca70;
+  font-size: 32px;
+  font-weight: 900;
+  margin: 18px 0;
+}
+
+.board-choices {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.board-choice {
+  border: 1px solid #604184;
+  border-radius: 10px;
+  background: #211438;
+  color: white;
+  padding: 13px 3px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.board-choice.selected {
+  background: #f5ca70;
+  border-color: #f5ca70;
+  color: #251633;
+}
+
+.board-choice.unavailable {
+  opacity: .35;
+  background: #171020;
+}
+
+.game-top-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin: 14px 0;
+}
+
+.game-top-panel > div {
+  background: #211438;
+  border: 1px solid #49345f;
+  border-radius: 12px;
+  padding: 13px 8px;
+  text-align: center;
+}
+
+.game-top-panel span {
+  display: block;
+  color: #a99dbd;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.game-top-panel strong {
+  display: block;
+  color: #f5ca70;
+  font-size: 22px;
+  margin-top: 7px;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1.4fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.called-board,
+.player-card-area {
+  min-width: 0;
+  background: #211438;
+  border: 1px solid #49345f;
+  border-radius: 12px;
+  padding: 8px 5px;
+}
+
+.bingo-letters {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+  margin-bottom: 7px;
+}
+
+.bingo-letters span {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: 5px;
+  background: #6b3da0;
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bingo-letters span:nth-child(1) {
+  background: #2876c7;
+}
+
+.bingo-letters span:nth-child(2) {
+  background: #c74444;
+}
+
+.bingo-letters span:nth-child(3) {
+  background: #319b68;
+}
+
+.bingo-letters span:nth-child(4) {
+  background: #d38b32;
+}
+
+.bingo-letters span:nth-child(5) {
+  background: #8b5cf6;
+}
+
+.called-numbers-board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+}
+
+.called-number {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: #38234f;
+  color: #d8cce6;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.called-number.called {
+  background: #f5ca70;
+  color: #251633;
+}
+
+.player-card-area h3 {
+  color: #f5ca70;
+  font-size: 10px;
+  text-align: center;
+  margin: 3px 0 9px;
+}
+
+.player-card-area h3 span {
+  color: white;
+}
+
+.player-letters span {
+  font-size: 13px;
+}
+
+.player-card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.player-cell {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 4px;
+  background: #38234f;
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.player-cell.marked {
+  background: #f5ca70;
+  color: #251633;
+}
+
+.player-cell.free {
+  background: #6b3da0;
+  color: white;
+  font-size: 8px;
+}
+
+#bingoBtn {
+  width: 100%;
+  margin-top: 15px;
+  padding: 17px;
+  border: 0;
+  border-radius: 13px;
+  background: linear-gradient(100deg, #ffb347, #ed7d20);
+  color: #251633;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.game-controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.game-controls button {
+  border: 1px solid #604184;
+  border-radius: 9px;
+  padding: 11px 3px;
+  background: #211438;
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+@media (max-width: 360px) {
+  .game-layout {
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.3fr);
+    gap: 5px;
+  }
+
+  .player-cell {
+    font-size: 8px;
+  }
+
+  .called-number {
+    font-size: 8px;
+  }
+}
