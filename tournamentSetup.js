@@ -77,20 +77,27 @@ async function ensureTomorrowTournament() {
     createdAt: Date.now()
   };
 
+  let created = false;
+
   const result = await tournamentRef.transaction((current) => {
-    if (current) return current;
+    if (current) {
+      created = false;
+      return current;
+    }
+
+    created = true;
     return tournament;
   });
 
-  if (result.committed) {
-    console.log(
-      `Tournament record created: ${tournamentDate}`
-    );
-  } else {
-    console.log(
-      `Tournament record already exists: ${tournamentDate}`
-    );
+  if (!result.committed) {
+    throw new Error("Unable to create or read the tournament record.");
   }
+
+  console.log(
+    created
+      ? `Tournament record created: ${tournamentDate}`
+      : `Tournament record already exists: ${tournamentDate}`
+  );
 
   return result.snapshot.val();
 }
