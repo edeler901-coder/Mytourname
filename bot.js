@@ -479,17 +479,30 @@ bot.on("message", async msg => {
         return bot.sendMessage(msg.chat.id, "That transaction ID format does not look valid. Please enter the ID exactly as shown in your payment SMS.");
       }
       const paymentRef = db.ref("incomingPaymentSms/" + transactionId);
+      const existingPayment = (await paymentRef.once("value")).val();
+      if (existingPayment && existingPayment.status === "credited") {
+        await sessionRef(id).remove();
+        return bot.sendMessage(msg.chat.id,
+          existingPayment.creditedTo === id
+            ? "This transaction has already been credited to your account."
+            : "❌ This transaction has already been used.",
+          back()
+        );
+      }
       const claim = await paymentRef.transaction(payment => {
-        if (!payment || payment.status !== "available") return;
-        if (Number(payment.amount) !== Number(s.amount)) return;
+        if (!payment || Number(payment.amount) !== Number(s.amount)) return;
         if (!payment.receivedAt || Date.now() - Number(payment.transactionTime || payment.receivedAt) > 72 * 60 * 60 * 1000) return;
         if (Number(payment.transactionTime || payment.receivedAt) > Date.now() + 5 * 60 * 1000) return;
-        payment.status = "claimed";
-        payment.claimedBy = id;
-        payment.claimedAt = Date.now();
-        return payment;
+        if (payment.status === "available") {
+          payment.status = "claimed";
+          payment.claimedBy = id;
+          payment.claimedAt = Date.now();
+          return payment;
+        }
+        if (payment.status === "claimed" && payment.claimedBy === id) return payment;
+        return;
       });
-      let payment = claim.snapshot.val();
+      const payment = claim.snapshot.val();
       if (!claim.committed || !payment || payment.claimedBy !== id || Number(payment.amount) !== Number(s.amount)) {
         await sessionRef(id).remove();
         return bot.sendMessage(msg.chat.id, "❌ We could not verify this deposit. Check the amount and transaction ID, and make sure the payment SMS was forwarded to our server within 72 hours.", back());
