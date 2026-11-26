@@ -1262,3 +1262,255 @@ body {
     font-size: 22px;
   }
 }
+
+
+/* GAME ROOM - FULL-WIDTH 40/60 LAYOUT */
+.app.game-active {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 8px 8px 105px;
+}
+
+.app.game-active > .header {
+  display: none;
+}
+
+.app.game-active #gameRoom {
+  width: 100%;
+  padding-top: 0;
+}
+
+.game-room-header {
+  margin-bottom: 10px;
+}
+
+.game-room-brand {
+  color: #ffffff;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  padding: 5px 2px 9px;
+}
+
+.game-room .game-info-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 5px;
+  align-items: stretch;
+  margin: 0;
+  padding: 7px;
+  background: #211438;
+  border: 1px solid #49345f;
+  border-radius: 11px;
+}
+
+.game-room .game-info-bar > div,
+.game-room .game-info-bar button {
+  min-width: 0;
+  min-height: 43px;
+  padding: 5px 2px;
+  border-radius: 7px;
+  background: #302044;
+  color: #bcaed0;
+  font-family: 'Inter', sans-serif;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.game-room .game-info-bar strong {
+  display: block;
+  margin-top: 4px;
+  color: #f5ca70;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.game-room .game-info-bar button {
+  font-size: 18px;
+  color: #fff;
+}
+
+.game-room .game-layout {
+  display: grid;
+  grid-template-columns: 40% minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  width: 100%;
+}
+
+.game-room .called-board,
+.game-room .player-card-area {
+  min-width: 0;
+  padding: 8px 5px;
+  border-radius: 10px;
+  background: #211438;
+  border: 1px solid #49345f;
+}
+
+.game-room .called-board::before {
+  content: "CALLED NUMBERS";
+  display: block;
+  margin: 1px 0 8px;
+  color: #c9b9df;
+  font-family: 'Inter', sans-serif;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .6px;
+  text-align: center;
+}
+
+.game-room .bingo-letters {
+  gap: 3px;
+  margin-bottom: 7px;
+}
+
+.game-room .bingo-letters span {
+  aspect-ratio: 1;
+  min-width: 0;
+  max-height: none;
+  border-radius: 5px;
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(12px, 3.5vw, 20px);
+}
+
+.game-room .called-numbers-board {
+  gap: 3px;
+}
+
+.game-room .called-number {
+  min-width: 0;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(9px, 2.6vw, 14px);
+}
+
+.game-room .player-card-area h3 {
+  margin: 3px 0 8px;
+  font-size: clamp(10px, 2.8vw, 14px);
+}
+
+.game-room .player-card-grid {
+  gap: 4px;
+}
+
+.game-room .player-cell {
+  min-width: 0;
+  aspect-ratio: 1;
+  border-radius: 5px;
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(13px, 4vw, 25px);
+  background: #4b5361;
+  color: #f3f4f6;
+}
+
+.game-room .player-cell.marked {
+  background: #f28a19;
+  color: #fff;
+}
+
+.game-room .player-cell.free {
+  background: #f5ca70;
+  color: #251633;
+  font-size: clamp(8px, 2.2vw, 12px);
+}
+
+.current-call-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 9px;
+  padding: 9px 11px;
+  min-height: 48px;
+  border: 1px solid #49345f;
+  border-radius: 10px;
+  background: #302044;
+  color: #c9b9df;
+  font-family: 'Inter', sans-serif;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.current-call-panel strong {
+  display: grid;
+  place-items: center;
+  min-width: 43px;
+  min-height: 36px;
+  padding: 3px 7px;
+  border-radius: 9px;
+  background: #f28a19;
+  color: #fff;
+  font-size: 17px;
+}
+
+.game-room #bingoBtn {
+  min-height: 54px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #ff9a50, #ff6500);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 20px;
+}
+
+.game-room #bingoBtn:disabled {
+  opacity: .65;
+}
+
+.game-room .game-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.game-room .game-controls button {
+  min-height: 42px;
+  border-radius: 9px;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+}
+
+@media (max-width: 360px) {
+  .app.game-active {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .game-room .game-layout {
+    grid-template-columns: 40% minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .game-room .called-board,
+  .game-room .player-card-area {
+    padding: 6px 3px;
+  }
+
+  .game-room .called-number {
+    font-size: 8px;
+  }
+
+  .game-room .player-card-grid {
+    gap: 3px;
+  }
+
+  .game-room .player-cell {
+    font-size: 11px;
+  }
+
+  .game-room .game-info-bar {
+    gap: 3px;
+    padding: 5px;
+  }
+
+  .game-room .game-info-bar > div,
+  .game-room .game-info-bar button {
+    font-size: 7px;
+  }
+}
