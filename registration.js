@@ -142,6 +142,35 @@ async function registerPlayerForTournament(telegramId, tournament) {
     };
   });
 
+  // Award the referral bonus only after the player's registration exists.
+  // The referrer's transaction records each referred player once, preventing duplicate rewards.
+  const referrerId = String(player.referredBy || "");
+  if (referrerId && referrerId !== telegramId) {
+    const referrerRef = db.ref(`players/${referrerId}`);
+    await referrerRef.transaction((referrer) => {
+      if (!referrer) return;
+      referrer.referralRewards = referrer.referralRewards || {};
+      if (referrer.referralRewards[telegramId]) return referrer;
+      referrer.balance = Number(referrer.balance || 0) + 10;
+      referrer.referralRewards[telegramId] = {
+        referredPlayerId: telegramId,
+        amount: 10,
+        status: "paid",
+        paidAt: Date.now(),
+        tournamentId
+      };
+      referrer.transactions = referrer.transactions || {};
+      referrer.transactions["referral_" + telegramId] = {
+        type: "referral_reward",
+        amount: 10,
+        status: "paid",
+        referredPlayerId: telegramId,
+        createdAt: Date.now()
+      };
+      return referrer;
+    });
+  }
+
   return {
     success: true,
     balance: player.balance,
