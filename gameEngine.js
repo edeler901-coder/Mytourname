@@ -1,4 +1,4 @@
-
+const { db } = require("./firebase");
 const {
   TOTAL_BOARDS,
   ensureBoardCatalog
