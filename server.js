@@ -14,6 +14,10 @@ const {
 } = require("./simulatorScheduler");
 
 const {
+  startGameScheduler
+} = require("./gameScheduler");
+
+const {
   startTournamentSetup,
   ensureTomorrowTournament
 } = require("./tournamentSetup");
@@ -140,9 +144,12 @@ app.listen(PORT, async () => {
     startTournamentSetup();
 
     // Start simulator registration scheduler
-    startSimulatorScheduler();
+startSimulatorScheduler();
 
-    console.log("Tournament systems initialized.");
+// Start automatic Bingo game scheduler
+startGameScheduler();
+
+console.log("Tournament systems initialized.");
 
   } catch (error) {
     console.error(
