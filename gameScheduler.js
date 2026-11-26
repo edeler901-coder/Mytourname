@@ -8,7 +8,11 @@ const {
   openBoardSelection,
   startMatch,
   callNextNumber,
-  getMatchState
+  getMatchState,
+  getBoardSelectionState,
+  selectBoard,
+  verifyBingo,
+  claimWinner
 } = require("./gameEngine");
 
 const CHECK_INTERVAL_MS = 1000;
@@ -113,12 +117,32 @@ async function processScheduledMatches() {
         if (!state) continue;
 
         if (state.status === "board_selection") {
+          // Simulator opponents choose a free permanent board during the same 100-second window.
+          for (const player of (state.players || []).filter(item => item && item.isSimulator === true)) {
+            try {
+              const selection = await getBoardSelectionState(
+                tournamentDate,
+                group.matchId,
+                player.telegramId
+              );
+              if (!selection.selectedBoardNumber) {
+                const available = selection.availableBoards.filter(board => board.available);
+                if (available.length) {
+                  const board = available[require("crypto").randomInt(available.length)];
+                  await selectBoard(tournamentDate, group.matchId, player.telegramId, board.boardNumber);
+                }
+              }
+            } catch (error) {
+              console.error("Simulator board selection failed:", player.telegramId, error.message);
+            }
+          }
+
           const noticeRef = db.ref("tournaments/" + tournamentDate + "/matches/" + group.matchId + "/notificationFlags/selection");
           const notificationTime = Date.now();
           const notice = await noticeRef.transaction(current => current || notificationTime);
           if (notice.committed && notice.snapshot.val() === notificationTime) {
             for (const player of (state.players || [])) {
-              if (player && player.telegramId) {
+              if (player && player.telegramId && player.isSimulator !== true) {
                 await bot.notifyPlayer(player.telegramId, "🎮 Your Group " + group.groupNumber + " match is open. Choose your Bingo board now. You have 100 seconds.");
               }
             }
@@ -148,7 +172,7 @@ async function processScheduledMatches() {
           const notice = await noticeRef.transaction(current => current || notificationTime);
           if (notice.committed && notice.snapshot.val() === notificationTime) {
             for (const player of (state.players || [])) {
-              if (player && player.telegramId) {
+              if (player && player.telegramId && player.isSimulator !== true) {
                 await bot.notifyPlayer(player.telegramId, "🔔 Your Group " + group.groupNumber + " Bingo match has started. Good luck!");
               }
             }
@@ -181,6 +205,32 @@ async function processScheduledMatches() {
           console.log(
             `Group ${group.groupNumber}: called ${result.letter}-${result.number}`
           );
+
+          // Simulator opponents use the same server-side winning-pattern verification as humans.
+          for (const player of (state.players || []).filter(item => item && item.isSimulator === true)) {
+            try {
+              const verification = await verifyBingo(
+                tournamentDate,
+                group.matchId,
+                player.telegramId
+              );
+              if (verification.valid) {
+                const winner = await claimWinner(
+                  tournamentDate,
+                  group.matchId,
+                  player.telegramId
+                );
+                console.log(
+                  `Simulator ${player.telegramId} claimed Bingo in Group ${group.groupNumber}.`
+                );
+                if (winner) break;
+              }
+            } catch (error) {
+              if (!String(error.message || "").includes("already has a winner")) {
+                console.error("Simulator Bingo check failed:", player.telegramId, error.message);
+              }
+            }
+          }
         }
 
       } catch (error) {
