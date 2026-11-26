@@ -4,12 +4,13 @@ const { db } = require("./firebase");
 const {
   DRAW_INTERVAL_MS,
   createMatch,
+  openBoardSelection,
   startMatch,
   callNextNumber,
   getMatchState
 } = require("./gameEngine");
 
-const CHECK_INTERVAL_MS = 5000;
+const CHECK_INTERVAL_MS = 1000;
 
 let schedulerStarted = false;
 let schedulerRunning = false;
@@ -69,16 +70,16 @@ async function processScheduledMatches() {
         continue;
       }
 
-      const matchKey = `${tournamentDate}_${group.matchId}`;
-
       try {
-        // Create the match once. Existing matches are preserved.
+        const matchKey = `${tournamentDate}_${group.matchId}`;
+
+        // Initialize match without overwriting existing data.
         if (!initializedMatches.has(matchKey)) {
           await createMatch(tournamentDate, group);
           initializedMatches.add(matchKey);
 
           console.log(
-            `Match ${group.groupNumber} initialized.`
+            `Group ${group.groupNumber}: match initialized.`
           );
         }
 
@@ -88,7 +89,7 @@ async function processScheduledMatches() {
 
         if (!Number.isFinite(scheduledTime)) {
           console.error(
-            `Invalid schedule for group ${group.groupNumber}.`
+            `Group ${group.groupNumber}: invalid scheduled time.`
           );
           continue;
         }
@@ -97,30 +98,61 @@ async function processScheduledMatches() {
           continue;
         }
 
-        // Start the match when its scheduled time arrives.
-        await startMatch(
+        // Open the 100-second board selection window.
+        await openBoardSelection(
           tournamentDate,
           group.matchId
         );
 
-        const state = await getMatchState(
+        let state = await getMatchState(
           tournamentDate,
           group.matchId
         );
 
+        if (!state) continue;
+
+        // Start only after board selection has closed.
+        if (state.status === "board_selection") {
+          if (
+            Date.now() >= Number(state.selectionEndsAt)
+          ) {
+            await startMatch(
+              tournamentDate,
+              group.matchId
+            );
+
+            state = await getMatchState(
+              tournamentDate,
+              group.matchId
+            );
+          }
+        }
+
+        // Only draw numbers while the match is active.
         if (!state || state.status !== "in_progress") {
           continue;
         }
 
-        // Draw the next number.
+        // Respect the five-second interval between draws.
+        const lastCalledAt = state.lastCalledNumber
+          ? Number(state.lastCalledNumber.calledAt)
+          : 0;
+
+        if (
+          lastCalledAt > 0 &&
+          Date.now() - lastCalledAt < DRAW_INTERVAL_MS
+        ) {
+          continue;
+        }
+
         const result = await callNextNumber(
           tournamentDate,
           group.matchId
         );
 
-        if (result && result.calledNumber) {
+        if (result) {
           console.log(
-            `Group ${group.groupNumber}: called ${result.calledNumber}`
+            `Group ${group.groupNumber}: called ${result.letter}-${result.number}`
           );
         }
 
