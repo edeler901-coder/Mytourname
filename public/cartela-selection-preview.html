@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bingo Champions — Cartela Selection</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:14px;background:#101a2b;color:#fff;font-family:Arial,sans-serif}
+.wrap{max-width:760px;margin:0 auto}
+h1{text-align:center;font-size:23px;letter-spacing:1px;margin:5px 0 18px}
+.panel{background:#1a2940;border:1px solid #34445d;border-radius:12px;padding:12px}
+.panel-title{text-align:center;color:#f2b24b;font-size:14px;font-weight:700;margin:0 0 11px}
+.boards{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:7px}
+.board-number{width:100%;aspect-ratio:1;border:1px solid #52627a;border-radius:7px;background:#263750;color:#fff;font-size:14px;font-weight:700;padding:0}
+.board-number.active{background:#f0a43a;color:#172235;border-color:#ffd17f}
+.board-number.taken{opacity:.3;text-decoration:line-through}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:5px 0 18px}
+.topbar h1{text-align:left;margin:0;font-size:21px}
+.countdown-wrap{flex:0 0 auto;min-width:92px;padding:7px 11px;border:1px solid #52627a;border-radius:9px;background:#1a2940;text-align:center}
+.countdown-label{display:block;color:#aeb9c9;font-size:9px;font-weight:700;letter-spacing:.7px}
+.countdown-wrap strong{display:block;color:#f2b24b;font-size:20px;font-variant-numeric:tabular-nums}
+.bottom{display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,.65fr);gap:14px;align-items:stretch;margin-top:14px}
+.confirm-panel{min-height:180px;display:flex;flex-direction:column;align-items:stretch}
+.confirm-panel .select-btn{margin:auto 0}
+.card-preview{max-width:240px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px}
+.cell{aspect-ratio:1;min-width:0;display:flex;align-items:center;justify-content:center;background:#e9edf3;color:#1b2738;border-radius:3px;font-size:clamp(9px,2.2vw,13px);font-weight:700}
+.cell.free{background:#ffe0a6;font-size:clamp(7px,1.8vw,10px)}
+.empty{padding:20px 5px;text-align:center;color:#aeb9c9;font-size:12px}
+.select-btn{width:100%;padding:16px 8px;border:0;border-radius:9px;background:#f0a43a;color:#172235;font-size:17px;font-weight:800}
+.select-btn:disabled{opacity:.45}
+@media(max-width:420px){
+ body{padding:9px}
+ .panel{padding:9px}
+ .topbar{gap:8px;margin-bottom:14px}
+ .topbar h1{font-size:17px}
+ .countdown-wrap{min-width:78px;padding:6px 8px}
+ .countdown-wrap strong{font-size:18px}
+ .boards{gap:6px}
+ .board-number{font-size:12px;border-radius:6px}
+ .bottom{grid-template-columns:minmax(0,1fr) minmax(105px,.65fr);gap:9px}
+ .confirm-panel{min-height:150px}
+ .select-btn{font-size:14px;padding:13px 5px}
+ .card-preview{gap:2px}
+ .panel-title{font-size:12px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="topbar">
+  <h1>BINGO CHAMPIONS</h1>
+  <div class="countdown-wrap">
+    <span class="countdown-label">TIME LEFT</span>
+    <strong id="countdown">01:40</strong>
+  </div>
+</header>
+<section class="panel">
+  <div class="panel-title">CHOOSE CARTELA NUMBER</div>
+  <div class="boards" id="boards"></div>
+</section>
+<div class="bottom">
+  <section class="panel">
+    <div class="panel-title">SELECTED CARTELA</div>
+    <div id="preview"><div class="empty">Choose a number above to preview your cartela</div></div>
+  </section>
+  <section class="panel confirm-panel">
+    <div class="panel-title">CONFIRM</div>
+    <button class="select-btn" id="selectBtn" disabled>SELECT</button>
+  </section>
+</div>
+</div>
+<script>
+const TOTAL_BOARDS=100;
+const COLUMNS={B:[1,15],I:[16,30],N:[31,45],G:[46,60],O:[61,75]};
+function seededRandom(seed){
+ let state=seed>>>0;
+ return function(){
+  state+=0x6D2B79F5;
+  let value=state;
+  value=Math.imul(value^(value>>>15),value|1);
+  value^=value+Math.imul(value^(value>>>7),value|61);
+  return ((value^(value>>>14))>>>0)/4294967296;
+ };
+}
+function hashSeed(value){
+ let hash=2166136261;
+ for(let i=0;i<value.length;i++){hash^=value.charCodeAt(i);hash=Math.imul(hash,16777619);}
+ return hash>>>0;
+}
+function shuffle(items,random){
+ const result=[...items];
+ for(let i=result.length-1;i>0;i--){
+  const j=Math.floor(random()*(i+1));
+  [result[i],result[j]]=[result[j],result[i]];
+ }
+ return result;
+}
+function generateBoard(boardNumber,attempt=0){
+ const random=seededRandom(hashSeed(`BINGO-CHAMPIONS-BOARD-V1-${boardNumber}-${attempt}`));
+ const card={};
+ for(const [letter,range] of Object.entries(COLUMNS)){
+  const numbers=[];
+  for(let n=range[0];n<=range[1];n++)numbers.push(n);
+  card[letter]=shuffle(numbers,random).slice(0,5);
+ }
+ card.N[2]=0;
+ return card;
+}
+function signature(card){return ["B","I","N","G","O"].map(k=>card[k].join(",")).join("|");}
+function generateCatalog(){
+ const catalog={},seen=new Set();
+ for(let number=1;number<=TOTAL_BOARDS;number++){
+  let attempt=0,card,sig;
+  do{card=generateBoard(number,attempt++);sig=signature(card);}while(seen.has(sig));
+  seen.add(sig);catalog[number]=card;
+ }
+ return catalog;
+}
+const catalog=generateCatalog();
+let selected=null;
+const boardsEl=document.getElementById("boards");
+const previewEl=document.getElementById("preview");
+const selectBtn=document.getElementById("selectBtn");
+function showPreview(number){
+ const card=catalog[number];
+ let html='<div class="card-preview">';
+ for(let row=0;row<5;row++){
+  for(const letter of ["B","I","N","G","O"]){
+   const free=letter==="N"&&row===2;
+   html+=`<div class="cell${free?" free":""}">${free?"FREE":card[letter][row]}</div>`;
+  }
+ }
+ html+='</div>';
+ previewEl.innerHTML=html;
+}
+for(let n=1;n<=TOTAL_BOARDS;n++){
+ const btn=document.createElement("button");
+ btn.type="button";btn.className="board-number";btn.textContent=n;
+ btn.addEventListener("click",()=>{
+  selected=n;
+  document.querySelectorAll(".board-number").forEach(x=>x.classList.remove("active"));
+  btn.classList.add("active");
+  showPreview(n);
+  selectBtn.disabled=false;
+ });
+ boardsEl.appendChild(btn);
+}
+selectBtn.addEventListener("click",()=>{
+ if(selected===null)return;
+ alert("Cartela "+selected+" selected in this design preview.");
+ // Live app must send this selection to the server for reservation.
+});
+// Preview-only countdown. The live app must display the server-controlled deadline.
+let secondsLeft=100;
+const countdownEl=document.getElementById("countdown");
+function updateCountdown(){
+ const minutes=String(Math.floor(secondsLeft/60)).padStart(2,"0");
+ const seconds=String(secondsLeft%60).padStart(2,"0");
+ countdownEl.textContent=minutes+":"+seconds;
+ if(secondsLeft>0)secondsLeft--;
+}
+updateCountdown();
+setInterval(updateCountdown,1000);
+</script>
+</body>
+</html>
