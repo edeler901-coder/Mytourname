@@ -114,8 +114,9 @@ async function processScheduledMatches() {
 
         if (state.status === "board_selection") {
           const noticeRef = db.ref("tournaments/" + tournamentDate + "/matches/" + group.matchId + "/notificationFlags/selection");
-          const notice = await noticeRef.transaction(current => current || Date.now());
-          if (notice.committed) {
+          const notificationTime = Date.now();
+          const notice = await noticeRef.transaction(current => current || notificationTime);
+          if (notice.committed && notice.snapshot.val() === notificationTime) {
             for (const player of (state.players || [])) {
               if (player && player.telegramId) {
                 await bot.notifyPlayer(player.telegramId, "🎮 Your Group " + group.groupNumber + " match is open. Choose your Bingo board now. You have 100 seconds.");
@@ -143,8 +144,9 @@ async function processScheduledMatches() {
 
         if (state && state.status === "in_progress") {
           const noticeRef = db.ref("tournaments/" + tournamentDate + "/matches/" + group.matchId + "/notificationFlags/started");
-          const notice = await noticeRef.transaction(current => current || Date.now());
-          if (notice.committed) {
+          const notificationTime = Date.now();
+          const notice = await noticeRef.transaction(current => current || notificationTime);
+          if (notice.committed && notice.snapshot.val() === notificationTime) {
             for (const player of (state.players || [])) {
               if (player && player.telegramId) {
                 await bot.notifyPlayer(player.telegramId, "🔔 Your Group " + group.groupNumber + " Bingo match has started. Good luck!");
