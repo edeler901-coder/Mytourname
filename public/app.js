@@ -36,6 +36,8 @@ async function loadTournament() {
 
     console.log("Tournament settings:", settings);
 
+    updateTournamentStats(settings);
+
     registerButton.disabled = false;
     registerButton.textContent =
       `REGISTER NOW - ${settings.entryFee} BR`;
@@ -45,6 +47,37 @@ async function loadTournament() {
 
     registerButton.disabled = true;
     registerButton.textContent = "TOURNAMENT UNAVAILABLE";
+  }
+}
+
+// Update the public tournament player count and prize pool
+function updateTournamentStats(settings) {
+  if (playersElement) {
+    playersElement.textContent =
+      Number(settings.registeredPlayers || 0).toLocaleString("en-US");
+  }
+
+  const poolElement = document.getElementById("prizePool");
+  if (poolElement) {
+    poolElement.textContent =
+      `${Number(settings.prizePool || 0).toLocaleString("en-US")} BR`;
+  }
+
+  const feeElement = document.getElementById("entryFeeStat");
+  if (feeElement) {
+    feeElement.textContent =
+      `${Number(settings.entryFee || 0).toLocaleString("en-US")} BR`;
+  }
+}
+
+// Refresh statistics without changing the registration button state
+async function loadTournamentStats() {
+  try {
+    const response = await fetch(`${API_URL}/api/tournament/settings`);
+    if (!response.ok) throw new Error("Could not refresh tournament statistics.");
+    updateTournamentStats(await response.json());
+  } catch (error) {
+    console.error("Tournament statistics error:", error);
   }
 }
 
@@ -110,6 +143,7 @@ async function registerTournament() {
     balanceElement.textContent = result.balance;
 
     registerButton.textContent = "REGISTERED ✓";
+    await loadTournamentStats();
 
     alert("Congratulations! You are registered.");
 
@@ -126,6 +160,7 @@ async function registerTournament() {
 // Start application
 loadTournament();
 loadPlayerBalance();
+setInterval(loadTournamentStats, 15000);
 // ===================================
 // BINGO CHAMPIONS - BOTTOM NAVIGATION
 // ===================================
