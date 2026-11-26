@@ -170,7 +170,8 @@ bot.onText(/^\/(menu|help)$/, async msg => {
 bot.onText(/^\/cancel$/, async msg => {
   try {
     const s = await session(msg.from.id);
-    if (s && s.type === "withdraw" && s.step === "method") {
+    if (s && s.type === "withdraw" && s.step === "method" && s.flowVersion !== 2) {
+      // Refund only an unfinished legacy session that had already deducted the amount.
       await playerRef(msg.from.id).transaction(p => {
         if (!p) return p;
         p.balance = Number(p.balance || 0) + Number(s.amount || 0);
@@ -322,6 +323,16 @@ bot.on("callback_query", async q => {
       return bot.sendMessage(chatId, "Match notifications are now " + (data === "n:on" ? "ON." : "OFF."), back());
     }
 
+    if (data === "w:telebirr" || data === "w:cbe") {
+      const current = await session(id);
+      if (!current || current.type !== "withdraw" || current.step !== "method" || current.flowVersion !== 2) {
+        return bot.sendMessage(chatId, "This withdrawal session has expired. Please start again.", back());
+      }
+      const method = data === "w:telebirr" ? "Telebirr" : "CBE Birr";
+      await sessionRef(id).update({ step: "firstName", method });
+      return bot.sendMessage(chatId, "Enter the first name on your " + method + " account.");
+    }
+
     if (data.startsWith("a:") && ADMIN_ID && id === ADMIN_ID) {
       const parts = data.split(":");
       const decision = parts[1], requestId = parts[2];
@@ -333,10 +344,21 @@ bot.on("callback_query", async q => {
         if (request.type === "withdraw") {
           await playerRef(request.telegramId).transaction(p => {
             if (!p) return p;
-            p.withdrawalRefunds = p.withdrawalRefunds || {};
-            if (p.withdrawalRefunds[requestId]) return p;
-            p.balance = Number(p.balance || 0) + Number(request.amount);
-            p.withdrawalRefunds[requestId] = { amount: Number(request.amount), refundedAt: Date.now() };
+            p.withdrawalReservations = p.withdrawalReservations || {};
+            const reservation = p.withdrawalReservations[requestId];
+            if (reservation && reservation.status === "pending") {
+              p.balance = Number(p.balance || 0) + Number(request.amount);
+              p.withdrawalHold = Math.max(0, Number(p.withdrawalHold || 0) - Number(request.amount));
+              reservation.status = "refunded";
+              reservation.refundedAt = Date.now();
+            } else if (!reservation) {
+              // Compatibility with requests created before the hold-based flow.
+              p.withdrawalRefunds = p.withdrawalRefunds || {};
+              if (!p.withdrawalRefunds[requestId]) {
+                p.balance = Number(p.balance || 0) + Number(request.amount);
+                p.withdrawalRefunds[requestId] = { amount: Number(request.amount), refundedAt: Date.now() };
+              }
+            }
             p.transactions = p.transactions || {};
             if (p.transactions[requestId]) p.transactions[requestId].status = "refunded";
             return p;
@@ -347,6 +369,20 @@ bot.on("callback_query", async q => {
         return bot.sendMessage(chatId, "Request rejected.");
       }
       if (decision === "approve") {
+        if (request.type === "withdraw") {
+          const release = await playerRef(request.telegramId).transaction(p => {
+            if (!p) return p;
+            p.withdrawalReservations = p.withdrawalReservations || {};
+            const reservation = p.withdrawalReservations[requestId];
+            if (reservation && reservation.status === "pending") {
+              p.withdrawalHold = Math.max(0, Number(p.withdrawalHold || 0) - Number(request.amount));
+              reservation.status = "paid";
+              reservation.paidAt = Date.now();
+            }
+            return p;
+          });
+          if (!release.committed) return bot.sendMessage(chatId, "Withdrawal could not be finalized.");
+        }
         if (request.type === "deposit") {
           const credit = await playerRef(request.telegramId).transaction(p => {
             if (!p) return p;
@@ -481,25 +517,63 @@ bot.on("message", async msg => {
       return bot.sendMessage(msg.chat.id, "✅ Deposit verified! " + Number(s.amount).toFixed(2) + " Br has been added to your balance.", back());
     }
     if (s.type === "withdraw" && s.step === "amount") {
-      const amount = validAmount(value);
-      if (!amount) return bot.sendMessage(msg.chat.id, "Enter a valid whole-number amount in Br.");
-      const debit = await playerRef(id).transaction(p => {
-        if (!p || !Number.isFinite(p.balance) || p.balance < amount) return;
-        p.balance -= amount;
+      const amount = Number(String(value).replace(/,/g, "").trim());
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000 || Math.round(amount * 100) !== amount * 100) {
+        return bot.sendMessage(msg.chat.id, "Enter a valid withdrawal amount in Br (up to two decimal places).");
+      }
+      const wallet = (await playerRef(id).child("balance").once("value")).val();
+      if (!Number.isFinite(Number(wallet)) || Number(wallet) < amount) {
+        return bot.sendMessage(msg.chat.id, "Insufficient withdrawable balance. Your available balance is " + Number(wallet || 0) + " Br.");
+      }
+      await sessionRef(id).set({ type: "withdraw", step: "method", flowVersion: 2, amount, updatedAt: Date.now() });
+      return bot.sendMessage(msg.chat.id, "Choose your withdrawal method:", {
+        reply_markup: { inline_keyboard: [
+          [{ text: "📱 Telebirr", callback_data: "w:telebirr" }],
+          [{ text: "🏦 CBE Birr", callback_data: "w:cbe" }],
+          [{ text: "⬅️ Cancel", callback_data: "m:home" }]
+        ] }
+      });
+    }
+    if (s.type === "withdraw" && s.step === "firstName" && s.flowVersion === 2) {
+      if (value.length < 2 || value.length > 60 || /[0-9]/.test(value)) {
+        return bot.sendMessage(msg.chat.id, "Enter a valid first name.");
+      }
+      await sessionRef(id).update({ step: "account", firstName: value });
+      return bot.sendMessage(msg.chat.id, "Enter the " + s.method + " account phone number or account number where you want to receive the money.");
+    }
+    if (s.type === "withdraw" && s.step === "account" && s.flowVersion === 2) {
+      const account = value.replace(/[\\s-]/g, "");
+      if (!/^[0-9]{8,16}$/.test(account)) {
+        return bot.sendMessage(msg.chat.id, "Enter a valid account or phone number using digits only.");
+      }
+      const requestId = crypto.randomUUID();
+      const reservation = await playerRef(id).transaction(p => {
+        if (!p || Number(p.balance || 0) < Number(s.amount)) return;
+        p.balance = Number(p.balance || 0) - Number(s.amount);
+        p.withdrawalHold = Number(p.withdrawalHold || 0) + Number(s.amount);
+        p.withdrawalReservations = p.withdrawalReservations || {};
+        if (p.withdrawalReservations[requestId]) return p;
+        p.withdrawalReservations[requestId] = { amount: Number(s.amount), status: "pending", createdAt: Date.now() };
+        p.transactions = p.transactions || {};
+        p.transactions[requestId] = { type: "withdraw", amount: Number(s.amount), method: s.method, status: "pending", createdAt: Date.now() };
         return p;
       });
-      if (!debit.committed) return bot.sendMessage(msg.chat.id, "Insufficient balance.");
-      await sessionRef(id).set({ type: "withdraw", step: "method", amount });
-      return bot.sendMessage(msg.chat.id, "Enter payment method and account/phone number (example: Telebirr 09xxxxxxxx). Send /cancel to return the reserved amount.");
-    }
-    if (s.type === "withdraw" && s.step === "method") {
-      if (value.length < 5 || value.length > 100) return bot.sendMessage(msg.chat.id, "Enter valid payment details.");
-      const requestId = crypto.randomUUID();
-      await db.ref("moneyRequests/" + requestId).set({ type: "withdraw", telegramId: id, amount: s.amount, paymentDetails: value, status: "pending", createdAt: Date.now() });
-      await db.ref("players/" + id + "/transactions/" + requestId).set({ type: "withdraw", amount: s.amount, status: "pending", createdAt: Date.now() });
+      if (!reservation.committed || !reservation.snapshot.child("withdrawalReservations/" + requestId).exists()) {
+        return bot.sendMessage(msg.chat.id, "Your available balance changed. Please start the withdrawal again.", back());
+      }
+      const request = {
+        type: "withdraw", telegramId: id, amount: Number(s.amount),
+        method: s.method, firstName: s.firstName, accountNumber: account,
+        status: "pending", createdAt: Date.now()
+      };
+      await db.ref("moneyRequests/" + requestId).set(request);
       await sessionRef(id).remove();
-      await notifyAdmin("💸 WITHDRAWAL REQUEST\nPlayer: " + id + "\nAmount: " + s.amount + " Br\nPayment details: " + value + "\nRequest: " + requestId, requestId, true);
-      return bot.sendMessage(msg.chat.id, "✅ Withdrawal request submitted. The amount is reserved pending admin review.", back());
+      await notifyAdmin(
+        "💸 WITHDRAWAL REQUEST\nPlayer: " + id + "\nAmount: " + s.amount + " Br\nMethod: " + s.method +
+        "\nFirst name: " + s.firstName + "\nAccount: " + account + "\nRequest: " + requestId,
+        requestId, true
+      );
+      return bot.sendMessage(msg.chat.id, "✅ Withdrawal request submitted. " + s.amount + " Br has been placed on hold until the admin marks it paid or rejects it.", back());
     }
     if (s.type === "transfer" && s.step === "recipientPhone") {
       const phoneNumber = normalizeEthiopianPhone(value);
