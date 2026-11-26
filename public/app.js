@@ -559,6 +559,73 @@ function renderPlayerCard(playerCard, drawnNumbers) {
 // RENDER CALLED NUMBERS
 // ===================================
 
+
+ 
+// ===================================
+// GAME ROOM CONTROLS
+// ===================================
+
+async function claimBingo() {
+  const button = document.getElementById("bingoBtn");
+
+  if (!tg || !tg.initData || button.disabled) return;
+
+  button.disabled = true;
+  button.textContent = "VERIFYING BINGO...";
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/player/claim-bingo`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": tg.initData
+        },
+        body: JSON.stringify({})
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Bingo claim could not be verified.");
+    }
+
+    button.textContent = "BINGO CONFIRMED ✓";
+    alert("BINGO CONFIRMED! You are the winner of this match.");
+
+    await refreshGameRoom();
+
+  } catch (error) {
+    alert(error.message);
+    button.disabled = false;
+    button.textContent = "BINGO!";
+  }
+}
+
+function leaveGameRoom() {
+  if (gameRoomPoll) {
+    clearInterval(gameRoomPoll);
+    gameRoomPoll = null;
+  }
+
+  const room = document.getElementById("gameRoom");
+  room.hidden = true;
+
+  tabContent.style.display = "block";
+  loadMyMatch();
+}
+
+document.getElementById("bingoBtn")
+  .addEventListener("click", claimBingo);
+
+document.getElementById("refreshGameBtn")
+  .addEventListener("click", refreshGameRoom);
+
+document.getElementById("leaveGameBtn")
+  .addEventListener("click", leaveGameRoom);
+
 function renderCalledNumbers(drawnNumbers) {
   const board = document.getElementById("calledNumbersBoard");
 
