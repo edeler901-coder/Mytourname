@@ -303,7 +303,7 @@ async function loadAssignment() {
   }
 }
 
-loadAssignment();
+// Assignment details are temporarily hidden from the Home tab.
 
 
 // ===================================
