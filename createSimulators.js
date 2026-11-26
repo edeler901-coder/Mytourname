@@ -1,7 +1,7 @@
 
 const { db } = require("./firebase");
 
-const STARTING_BALANCE = 10000;
+const STARTING_BALANCE = 0;
 
 const usernames = [
   // 20 Habesha names
@@ -108,6 +108,7 @@ async function createSimulators() {
       isSimulator: true,
       accountType: "simulator",
       balance: STARTING_BALANCE,
+      fundingVersion: 1,
       createdAt: now,
       gamesPlayed: 0,
       gamesWon: 0
