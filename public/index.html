@@ -96,11 +96,15 @@
     <!-- BINGO CHAMPIONS GAME ROOM -->
 <section id="gameRoom" class="game-room" hidden>
 
-  <div class="game-info-bar">
-    <div>GAME <strong id="gameId">—</strong></div>
-    <div>PLAYERS <strong id="gamePlayers">0</strong></div>
-    <div>CALLS <strong id="callsCount">0</strong></div>
-    <button id="soundBtn" type="button">🔊</button>
+  <div class="game-room-header">
+    <div class="game-room-brand">BINGO CHAMPIONS</div>
+    <div class="game-info-bar">
+      <div>GAME ID<strong id="gameId">—</strong></div>
+      <div>PLAYERS<strong id="gamePlayers">0</strong></div>
+      <div>CALLS<strong id="callsCount">0</strong></div>
+      <div>TIME<strong id="gameCountdown">—</strong></div>
+      <button id="soundBtn" type="button" aria-label="Sound">🔊</button>
+    </div>
   </div>
 
   <!-- WAITING / BOARD SELECTION -->
@@ -114,15 +118,9 @@
   <!-- LIVE GAME -->
   <div id="liveGameScreen" hidden>
 
-    <div class="game-top-panel">
-      <div>
-        <span>TIME LEFT</span>
-        <strong id="gameCountdown">—</strong>
-      </div>
-      <div>
-        <span>LAST CALL</span>
-        <strong id="latestCall">—</strong>
-      </div>
+    <div class="current-call-panel">
+      <span>CURRENT CALL</span>
+      <strong id="latestCall">—</strong>
     </div>
 
     <div class="game-layout">
