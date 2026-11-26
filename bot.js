@@ -14,6 +14,20 @@ if (!TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is missing.");
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 
+// Telegram's native Menu button opens the bot command list.
+// /menu then displays the complete 13-button inline player menu.
+bot.setMyCommands([
+  { command: "menu", description: "Open all player services" },
+  { command: "balance", description: "Check your balance" },
+  { command: "deposit", description: "Deposit money" },
+  { command: "withdraw", description: "Withdraw money" },
+  { command: "cancel", description: "Cancel current operation" },
+  { command: "start", description: "Start or reopen your account" }
+]).catch(error => console.error("Bot commands setup failed:", error.message));
+
+bot.setChatMenuButton({ menu_button: { type: "commands" } })
+  .catch(error => console.error("Bot Menu button setup failed:", error.message));
+
 function menu() {
   const rows = [];
   if (WEBAPP_URL && WEBAPP_URL.startsWith("https://")) {
