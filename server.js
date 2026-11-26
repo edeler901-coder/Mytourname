@@ -59,13 +59,55 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Tournament settings
-app.get("/api/tournament/settings", (req, res) => {
-  res.json({
-    entryFee: ENTRY_FEE,
-    totalGroups: TOTAL_GROUPS,
-    prizeSplit: PRIZE_SPLIT
-  });
+// Tournament settings and live registration statistics
+app.get("/api/tournament/settings", async (req, res) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Addis_Ababa",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+
+    const date = {};
+    parts.forEach(part => {
+      date[part.type] = part.value;
+    });
+
+    const today = `${date.year}-${date.month}-${date.day}`;
+    const [year, month, day] = today.split("-").map(Number);
+    const tournamentDate = new Date(
+      Date.UTC(year, month - 1, day + 1)
+    ).toISOString().slice(0, 10);
+
+    const registrationsSnapshot = await db
+      .ref(`tournaments/${tournamentDate}/registrations`)
+      .once("value");
+
+    const registrations = registrationsSnapshot.val() || {};
+    const registeredPlayers = Object.keys(registrations).length;
+    const grossContributions = registeredPlayers * ENTRY_FEE;
+    const prizePercentage =
+      Number(PRIZE_SPLIT.first || 0) +
+      Number(PRIZE_SPLIT.second || 0) +
+      Number(PRIZE_SPLIT.third || 0);
+    const prizePool = grossContributions * prizePercentage / 100;
+
+    return res.json({
+      entryFee: ENTRY_FEE,
+      totalGroups: TOTAL_GROUPS,
+      prizeSplit: PRIZE_SPLIT,
+      tournamentDate,
+      registeredPlayers,
+      grossContributions,
+      prizePool
+    });
+  } catch (error) {
+    console.error("Tournament stats error:", error);
+    return res.status(500).json({
+      error: "Unable to load tournament statistics."
+    });
+  }
 });
 
 // Player wallet
