@@ -157,8 +157,21 @@ bot.on("callback_query", async q => {
         return bot.sendMessage(chatId, "🎮 MY MATCHES\n\n" + body, back());
       }
       if (action === "results") {
-        const snap = await db.ref("players/" + id + "/gamesWon").once("value");
-        return bot.sendMessage(chatId, "🏅 TOURNAMENT RESULTS\n\nRecorded wins: " + Number(snap.val() || 0) + "\nCheck the Mini App for match details.", back());
+        const tournamentSnap = await db.ref("tournaments").orderByKey().limitToLast(10).once("value");
+        const tournaments = tournamentSnap.val() || {};
+        const wins = [];
+        for (const [date, tournament] of Object.entries(tournaments).reverse()) {
+          const groups = tournament && tournament.groups || {};
+          for (const group of Object.values(groups)) {
+            if (!group || !group.matchId) continue;
+            const matchSnap = await db.ref("tournaments/" + date + "/matches/" + group.matchId).once("value");
+            const match = matchSnap.val();
+            if (match && match.winner && String(match.winner.telegramId) === id) {
+              wins.push("🏆 " + date + " — Group " + group.groupNumber);
+            }
+          }
+        }
+        return bot.sendMessage(chatId, wins.length ? "🏅 YOUR RECENT WINS\n\n" + wins.join("\n") : "No wins have been recorded for your account yet.", back());
       }
     }
 
@@ -173,7 +186,12 @@ bot.on("callback_query", async q => {
         if (request.type === "withdraw") {
           await playerRef(request.telegramId).transaction(p => {
             if (!p) return p;
+            p.withdrawalRefunds = p.withdrawalRefunds || {};
+            if (p.withdrawalRefunds[requestId]) return p;
             p.balance = Number(p.balance || 0) + Number(request.amount);
+            p.withdrawalRefunds[requestId] = { amount: Number(request.amount), refundedAt: Date.now() };
+            p.transactions = p.transactions || {};
+            if (p.transactions[requestId]) p.transactions[requestId].status = "refunded";
             return p;
           });
         }
@@ -195,9 +213,16 @@ bot.on("callback_query", async q => {
           });
           if (!credit.committed) return bot.sendMessage(chatId, "Deposit could not be credited.");
         }
-        await ref.update({ status: "approved", reviewedAt: Date.now(), reviewedBy: id });
-        await bot.sendMessage(request.telegramId, "✅ Your " + request.type + " request for " + request.amount + " Br has been marked approved.");
-        return bot.sendMessage(chatId, request.type === "withdraw" ? "Mark the manual payment as sent before approving this request." : "Deposit approved.");
+        const finalStatus = request.type === "withdraw" ? "paid" : "approved";
+        await ref.update({ status: finalStatus, reviewedAt: Date.now(), reviewedBy: id });
+        await playerRef(request.telegramId).child("transactions/" + requestId).update({
+          status: finalStatus,
+          reviewedAt: Date.now()
+        });
+        await bot.sendMessage(request.telegramId, request.type === "withdraw"
+          ? "✅ Your withdrawal of " + request.amount + " Br has been marked paid by the admin."
+          : "✅ Your deposit of " + request.amount + " Br has been credited to your wallet.");
+        return bot.sendMessage(chatId, request.type === "withdraw" ? "Withdrawal marked paid." : "Deposit approved and credited.");
       }
     }
   } catch (e) {
