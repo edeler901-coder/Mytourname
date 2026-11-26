@@ -439,7 +439,7 @@ bot.on("message", async msg => {
     }
     if (s.type === "deposit" && s.step === "transactionId") {
       const transactionId = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!/^(?=.*[A-Z])(?=.*\\d)[A-Z0-9]{8,20}$/.test(transactionId)) {
+      if (!/^(?=.*[A-Z])(?=.*\d)[A-Z0-9]{8,20}$/.test(transactionId)) {
         return bot.sendMessage(msg.chat.id, "That transaction ID format does not look valid. Please enter the ID exactly as shown in your payment SMS.");
       }
       const paymentRef = db.ref("incomingPaymentSms/" + transactionId);
