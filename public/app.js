@@ -240,3 +240,110 @@ async function loadAssignment() {
 }
 
 loadAssignment();
+
+// ===================================
+// MY MATCHES - LOAD PLAYER MATCH
+// ===================================
+
+async function loadMyMatch() {
+  if (!tg || !tg.initData) {
+    tabContent.innerHTML = `
+      <h2>MY MATCHES</h2>
+      <p>Open Bingo Champions through Telegram to view your match.</p>
+    `;
+    return;
+  }
+
+  tabContent.innerHTML = `
+    <h2>MY MATCHES</h2>
+    <p>Loading your match...</p>
+  `;
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/player/match`,
+      {
+        headers: {
+          "X-Telegram-Init-Data": tg.initData
+        }
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Could not load your match.");
+    }
+
+    if (!result.ready) {
+      tabContent.innerHTML = `
+        <h2>MY MATCHES</h2>
+        <p>${result.message || "Your match is not available yet."}</p>
+      `;
+      return;
+    }
+
+    const match = result.match;
+
+    const matchTime = new Date(match.scheduledAt)
+      .toLocaleTimeString("en-GB", {
+        timeZone: "Africa/Addis_Ababa",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+
+    const canEnter = [
+      "board_selection",
+      "in_progress",
+      "completed"
+    ].includes(match.status);
+
+    tabContent.innerHTML = `
+      <h2>YOUR MATCH</h2>
+
+      <div class="tournament-card">
+        <p>GROUP ${match.groupNumber}</p>
+        <h2>Match ${match.matchId}</h2>
+        <p>Scheduled time: ${matchTime}</p>
+        <p>Status: ${match.status.replace("_", " ").toUpperCase()}</p>
+        <p>Players: ${match.playerCount}</p>
+
+        <button
+          id="enterMatchBtn"
+          ${canEnter ? "" : "disabled"}
+          style="width:100%;margin-top:15px;"
+        >
+          ${canEnter ? "PLAY MATCH" : "WAIT FOR MATCH TIME"}
+        </button>
+      </div>
+    `;
+
+    const enterButton = document.getElementById("enterMatchBtn");
+
+    if (canEnter) {
+      enterButton.addEventListener("click", () => {
+        homeSections.forEach(section => {
+          section.style.display = "none";
+        });
+
+        tabContent.style.display = "none";
+        document.getElementById("gameRoom").hidden = false;
+
+        document.getElementById("selectionScreen").hidden =
+          match.status !== "board_selection";
+
+        document.getElementById("liveGameScreen").hidden =
+          match.status !== "in_progress" &&
+          match.status !== "completed";
+      });
+    }
+
+  } catch (error) {
+    console.error("My match error:", error);
+
+    tabContent.innerHTML = `
+      <h2>MY MATCHES</h2>
+      <p>${error.message}</p>
+    `;
+  }
+}
