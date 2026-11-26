@@ -1,5 +1,6 @@
 
 const crypto = require("crypto");
+const { db } = require("./firebase");
 
 function verifyTelegramInitData(initData) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -67,9 +68,8 @@ function verifyTelegramInitData(initData) {
   }
 }
 
-function requireTelegramAuth(req, res, next) {
+async function requireTelegramAuth(req, res, next) {
   const initData = req.headers["x-telegram-init-data"];
-
   const user = verifyTelegramInitData(initData);
 
   if (!user) {
@@ -78,8 +78,24 @@ function requireTelegramAuth(req, res, next) {
     });
   }
 
-  req.telegramUser = user;
-  next();
+  try {
+    const playerSnapshot = await db.ref("players/" + String(user.id)).once("value");
+    const player = playerSnapshot.val();
+
+    if (!player || player.phoneVerified !== true || !player.phoneNumber) {
+      return res.status(403).json({
+        error: "Phone verification is required before using Bingo Champions."
+      });
+    }
+
+    req.telegramUser = user;
+    next();
+  } catch (error) {
+    console.error("Phone verification lookup failed:", error);
+    return res.status(503).json({
+      error: "Unable to verify your player account. Please try again."
+    });
+  }
 }
 
 module.exports = {
