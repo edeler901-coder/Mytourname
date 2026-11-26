@@ -48,6 +48,34 @@ async function loadTournament() {
   }
 }
 
+// Load the authenticated player's live wallet balance
+async function loadPlayerBalance() {
+  if (!tg || !tg.initData) {
+    balanceElement.textContent = "—";
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/player/balance`, {
+      headers: {
+        "X-Telegram-Init-Data": tg.initData
+      }
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Could not load wallet balance.");
+    }
+
+    balanceElement.textContent =
+      Number(result.balance || 0).toLocaleString("en-US");
+  } catch (error) {
+    console.error("Wallet balance error:", error);
+    balanceElement.textContent = "—";
+  }
+}
+
 // Register for tournament
 async function registerTournament() {
   if (!tg || !tg.initData) {
@@ -97,6 +125,7 @@ async function registerTournament() {
 
 // Start application
 loadTournament();
+loadPlayerBalance();
 // ===================================
 // BINGO CHAMPIONS - BOTTOM NAVIGATION
 // ===================================
