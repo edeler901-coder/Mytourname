@@ -36,7 +36,9 @@ async function assignTournamentPlayers(tournamentDate) {
       )
       .map(([id, registration]) => ({
         telegramId: String(id),
-        registeredAt: registration.registeredAt || null
+        registeredAt: registration.registeredAt || null,
+        isSimulator: registration.isSimulator === true,
+        displayName: registration.displayName || registration.username || null
       }));
 
     const updated = JSON.parse(JSON.stringify(current));
