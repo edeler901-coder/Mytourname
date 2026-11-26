@@ -168,6 +168,7 @@ async function startMatch(tournamentDate, matchId) {
 // CALL NEXT NUMBER
 // =====================================
 
+
 async function callNextNumber(tournamentDate, matchId) {
   const matchRef = db.ref(
     `tournaments/${tournamentDate}/matches/${matchId}`
@@ -180,6 +181,8 @@ async function callNextNumber(tournamentDate, matchId) {
     throw new Error("Match is not active.");
   }
 
+  let drawnNumber = null;
+
   const poolRef = matchRef.child("numberPool");
 
   const result = await poolRef.transaction((pool) => {
@@ -187,50 +190,41 @@ async function callNextNumber(tournamentDate, matchId) {
       return;
     }
 
-    const updatedPool = [...pool];
-    updatedPool.shift();
+    drawnNumber = pool[0];
 
-    return updatedPool;
+    return pool.slice(1);
   });
 
-  if (!result.committed) {
+  if (!result.committed || drawnNumber === null) {
     throw new Error("No more numbers available.");
   }
 
-  const updatedPool = result.snapshot.val();
-
-  const number = match.numberPool[0];
-
-  if (!number) {
-    throw new Error("Number calling failed.");
-  }
-
   const calledNumber = {
-    number,
-    letter: getLetter(number),
+    number: drawnNumber,
+    letter: getLetter(drawnNumber),
     calledAt: Date.now()
   };
 
   await matchRef.child("drawnNumbers").transaction((current) => {
     const numbers = Array.isArray(current) ? current : [];
 
-    if (numbers.includes(number)) {
+    if (numbers.includes(drawnNumber)) {
       return;
     }
 
-    numbers.push(number);
+    numbers.push(drawnNumber);
     return numbers;
   });
 
   await matchRef.update({
     lastCalledNumber: calledNumber,
-    remainingNumbers: Array.isArray(updatedPool)
-      ? updatedPool.length
-      : 0
+    lastCalledAt: calledNumber.calledAt,
+    remainingNumbers: result.snapshot.val().length
   });
 
   return calledNumber;
 }
+
 
 // =====================================
 // WINNING PATTERN VALIDATION
