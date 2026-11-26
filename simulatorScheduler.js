@@ -155,6 +155,21 @@ async function prepareDailySchedule() {
     return null;
   }
 
+  if (!ADMIN_ID) {
+    console.error("ADMIN_ID is not configured; simulator registrations are paused.");
+    return null;
+  }
+
+  const entryFee = Number(tournament.entryFee || ENTRY_FEE);
+  if (!Number.isFinite(entryFee) || entryFee <= 0) {
+    console.error("Tournament entry fee is invalid; simulator registrations are paused.");
+    return null;
+  }
+
+  const adminSnapshot = await db.ref(`players/${ADMIN_ID}`).once("value");
+  const adminBalance = Number(adminSnapshot.val()?.balance || 0);
+  const affordableCount = Math.floor(adminBalance / entryFee);
+
   const simulatorSnapshot = await db
     .ref("simulators")
     .once("value");
@@ -173,7 +188,12 @@ async function prepareDailySchedule() {
     )
     .map(([id]) => id);
 
-  if (eligibleIds.length < MIN_SIMS) {
+  const affordableIds = shuffle(eligibleIds).slice(
+    0,
+    Math.min(eligibleIds.length, affordableCount)
+  );
+
+  if (affordableIds.length < MIN_SIMS) {
     console.error(
       `Only ${eligibleIds.length} eligible simulators. At least ${MIN_SIMS} are required.`
     );
@@ -183,7 +203,7 @@ async function prepareDailySchedule() {
   const schedule = createDailySchedule(
     registrationDate,
     tournamentDate,
-    eligibleIds
+    affordableIds
   );
 
   const result = await scheduleRef.transaction((current) => {
