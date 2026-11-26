@@ -226,6 +226,7 @@ async function getBoardSelectionState(
 // SELECT BOARD - ATOMIC RESERVATION
 // =====================================
 
+
 async function selectBoard(
   tournamentDate,
   matchId,
@@ -282,20 +283,34 @@ async function selectBoard(
     selection.selectedBoards = selection.selectedBoards || {};
     selection.playerBoards = selection.playerBoards || {};
 
-    if (selection.playerBoards[telegramId]) {
-      rejectionReason = "You have already selected a board.";
-      return;
+    const boardKey = String(boardNumber);
+    const previousBoard = selection.playerBoards[telegramId];
+
+    // Selecting the same board again changes nothing.
+    if (Number(previousBoard) === boardNumber) {
+      return match;
     }
 
-    const boardKey = String(boardNumber);
+    // Check the new board before releasing the old one.
     const existingOwner = selection.selectedBoards[boardKey];
 
-    if (existingOwner) {
+    if (existingOwner && String(existingOwner) !== telegramId) {
       rejectionReason = "This board has already been selected.";
       return;
     }
 
-    // Both reservations happen in one transaction.
+    // Release the player's previous board.
+    if (previousBoard) {
+      const previousKey = String(previousBoard);
+
+      if (
+        String(selection.selectedBoards[previousKey]) === telegramId
+      ) {
+        delete selection.selectedBoards[previousKey];
+      }
+    }
+
+    // Reserve the new board.
     selection.selectedBoards[boardKey] = telegramId;
     selection.playerBoards[telegramId] = boardNumber;
 
@@ -317,6 +332,7 @@ async function selectBoard(
     boardNumber
   };
 }
+
 
 // =====================================
 // GET PLAYER'S PERMANENT BOARD
