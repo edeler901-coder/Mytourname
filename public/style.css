@@ -1174,3 +1174,92 @@ body {
     font-size: 7px;
   }
 }
+
+
+/* SIDE-BY-SIDE WELCOME AND WALLET */
+.welcome-wallet-row {
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 10px;
+  align-items: stretch;
+  margin-bottom: 22px;
+}
+
+.welcome-wallet-row .welcome {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 2px;
+}
+
+.welcome-wallet-row .welcome h2 {
+  font-size: 17px;
+  line-height: 1.18;
+}
+
+.welcome-wallet-row .description {
+  font-size: 9px;
+  line-height: 1.35;
+  margin-top: 7px;
+}
+
+.welcome-wallet-row .wallet {
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 14px 11px;
+  gap: 5px;
+  border-radius: 16px;
+}
+
+.welcome-wallet-row .wallet p {
+  font-size: 8px;
+  line-height: 1.35;
+  letter-spacing: .5px;
+}
+
+.welcome-wallet-row .wallet h2 {
+  font-size: 23px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.welcome-wallet-row .wallet small {
+  font-size: 10px;
+}
+
+.welcome-wallet-row .wallet-icon {
+  font-size: 25px;
+}
+
+@media (max-width: 360px) {
+  .welcome-wallet-row {
+    gap: 7px;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .welcome-wallet-row .welcome h2 {
+    font-size: 15px;
+  }
+
+  .welcome-wallet-row .small-title {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+
+  .welcome-wallet-row .description {
+    font-size: 8px;
+  }
+
+  .welcome-wallet-row .wallet {
+    padding: 12px 8px;
+  }
+
+  .welcome-wallet-row .wallet h2 {
+    font-size: 20px;
+  }
+
+  .welcome-wallet-row .wallet-icon {
+    font-size: 22px;
+  }
+}
