@@ -90,6 +90,71 @@
       </div>
     </section>
 
+    <!-- BINGO CHAMPIONS GAME ROOM -->
+<section id="gameRoom" class="game-room" hidden>
+
+  <div class="game-info-bar">
+    <div>GAME <strong id="gameId">—</strong></div>
+    <div>PLAYERS <strong id="gamePlayers">0</strong></div>
+    <div>CALLS <strong id="callsCount">0</strong></div>
+    <button id="soundBtn" type="button">🔊</button>
+  </div>
+
+  <!-- WAITING / BOARD SELECTION -->
+  <div id="selectionScreen" hidden>
+    <h2>CHOOSE YOUR BINGO BOARD</h2>
+    <p id="selectionMessage">Board selection opens at your match time.</p>
+    <div id="selectionTimer">00:00</div>
+    <div id="boardChoices" class="board-choices"></div>
+  </div>
+
+  <!-- LIVE GAME -->
+  <div id="liveGameScreen" hidden>
+
+    <div class="game-top-panel">
+      <div>
+        <span>TIME LEFT</span>
+        <strong id="gameCountdown">—</strong>
+      </div>
+      <div>
+        <span>LAST CALL</span>
+        <strong id="latestCall">—</strong>
+      </div>
+    </div>
+
+    <div class="game-layout">
+
+      <div class="called-board">
+        <div class="bingo-letters">
+          <span>B</span><span>I</span><span>N</span>
+          <span>G</span><span>O</span>
+        </div>
+        <div id="calledNumbersBoard" class="called-numbers-board"></div>
+      </div>
+
+      <div class="player-card-area">
+        <h3>YOUR BOARD <span id="playerBoardNumber">—</span></h3>
+        <div class="bingo-letters player-letters">
+          <span>B</span><span>I</span><span>N</span>
+          <span>G</span><span>O</span>
+        </div>
+        <div id="playerCardGrid" class="player-card-grid"></div>
+      </div>
+
+    </div>
+
+    <button id="bingoBtn" type="button">BINGO!</button>
+
+    <div class="game-controls">
+      <button id="refreshGameBtn" type="button">REFRESH</button>
+      <button id="leaveGameBtn" type="button">LEAVE</button>
+      <button id="addBoardBtn" type="button">ADD BOARD</button>
+    </div>
+
+  </div>
+
+</section>
+
     <nav class="bottom-nav">
   <button class="active" data-tab="home">
     🏠<span>HOME</span>
