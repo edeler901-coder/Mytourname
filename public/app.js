@@ -57,6 +57,14 @@ function updateTournamentStats(settings) {
       Number(settings.registeredPlayers || 0).toLocaleString("en-US");
   }
 
+  const breakdownElement = document.getElementById("playerBreakdown");
+  if (breakdownElement) {
+    const humans = Number(settings.humanPlayers || 0);
+    const simulators = Number(settings.simulatorPlayers || 0);
+    breakdownElement.textContent =
+      `${humans.toLocaleString("en-US")} HUMAN · ${simulators.toLocaleString("en-US")} AI OPPONENTS`;
+  }
+
   const poolElement = document.getElementById("prizePool");
   if (poolElement) {
     poolElement.textContent =
