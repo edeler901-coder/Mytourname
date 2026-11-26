@@ -11,7 +11,6 @@ const COLUMNS = {
   O: [61, 75]
 };
 
-// Create a repeatable random generator
 function seededRandom(seed) {
   let state = seed >>> 0;
 
@@ -26,7 +25,6 @@ function seededRandom(seed) {
   };
 }
 
-// Create a stable seed for each board
 function hashSeed(value) {
   let hash = 2166136261;
 
@@ -38,20 +36,17 @@ function hashSeed(value) {
   return hash >>> 0;
 }
 
-// Shuffle using the seeded generator
 function shuffle(items, random) {
   const result = [...items];
 
   for (let i = result.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
-
     [result[i], result[j]] = [result[j], result[i]];
   }
 
   return result;
 }
 
-// Generate one permanent board
 function generateBoard(boardNumber, attempt = 0) {
   const seed = hashSeed(
     `BINGO-CHAMPIONS-BOARD-V1-${boardNumber}-${attempt}`
@@ -70,13 +65,11 @@ function generateBoard(boardNumber, attempt = 0) {
     card[letter] = shuffle(numbers, random).slice(0, 5);
   }
 
-  // Free centre space
   card.N[2] = 0;
 
   return card;
 }
 
-// Generate all 100 unique permanent boards
 function generateBoardCatalog() {
   const catalog = {};
   const usedLayouts = new Set();
@@ -103,8 +96,6 @@ function generateBoardCatalog() {
   return catalog;
 }
 
-// Save the catalog once.
-// Existing boards are never overwritten.
 async function ensureBoardCatalog() {
   const catalogRef = db.ref("gameConfig/boardCatalog");
   const generated = generateBoardCatalog();
@@ -132,9 +123,32 @@ async function ensureBoardCatalog() {
   return result.snapshot.val();
 }
 
+// GET ONE PERMANENT BOARD BY NUMBER
+async function getBoardByNumber(boardNumber) {
+  boardNumber = Number(boardNumber);
+
+  if (
+    !Number.isInteger(boardNumber) ||
+    boardNumber < 1 ||
+    boardNumber > TOTAL_BOARDS
+  ) {
+    throw new Error("Invalid board number.");
+  }
+
+  const catalog = await ensureBoardCatalog();
+  const board = catalog[String(boardNumber)];
+
+  if (!board || !board.card) {
+    throw new Error(`Board ${boardNumber} was not found.`);
+  }
+
+  return board;
+}
+
 module.exports = {
   TOTAL_BOARDS,
   generateBoard,
   generateBoardCatalog,
-  ensureBoardCatalog
+  ensureBoardCatalog,
+  getBoardByNumber
 };
