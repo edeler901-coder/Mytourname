@@ -311,10 +311,9 @@ bot.on("callback_query", async q => {
       if (!account) {
         return bot.sendMessage(chatId, provider + " deposit account is not configured yet. Please contact support.", back());
       }
-      await sessionRef(id).set({ type: "deposit", step: "amount", provider, updatedAt: Date.now() });
+      await sessionRef(id).set({ type: "deposit", step: "amount", provider, account, updatedAt: Date.now() });
       return bot.sendMessage(chatId,
-        "💳 DEPOSIT — " + provider + "\n\nSend your payment to:\n" + account +
-        "\n\nEnter the amount you are going to deposit in Br. After paying, enter the transaction ID from your confirmation SMS. Your deposit is verified automatically within 72 hours."
+        "💳 DEPOSIT — " + provider + "\n\nEnter the amount in Br that you want to deposit. I will then show you the payment account and instructions."
       );
     }
 
@@ -470,44 +469,73 @@ bot.on("message", async msg => {
       if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000 || Math.round(amount * 100) !== amount * 100) {
         return bot.sendMessage(msg.chat.id, "Enter a valid amount in Br (up to two decimal places).");
       }
-      await sessionRef(id).update({ step: "transactionId", amount });
-      return bot.sendMessage(msg.chat.id, "After making the payment, enter the transaction ID from your payment confirmation SMS. Do not send the whole SMS. Send /cancel to stop.");
+      const account = s.account || (s.provider === "Telebirr" ? TELEBIRR_ACCOUNT : CBE_BIRR_ACCOUNT);
+      if (!account) {
+        await sessionRef(id).remove();
+        return bot.sendMessage(msg.chat.id, "The payment account is not configured. Please contact support.", back());
+      }
+      await sessionRef(id).update({ step: "confirmationSms", amount });
+      const providerLabel = s.provider === "Telebirr" ? "የቴሌብር" : "የCBE Birr";
+      const instructions =
+        "💳 " + s.provider.toUpperCase() + " DEPOSIT\n\n" +
+        providerLabel + " አካውንት: " + account + "\n\n" +
+        "1. ከላይ ባለው አካውንት " + amount.toFixed(2) + " ብር ያስገቡ።\n\n" +
+        "2. የሚልኩት የገንዘብ መጠን እና እዚህ ያስገቡት የብር መጠን ተመሳሳይ መሆኑን ያረጋግጡ።\n\n" +
+        "3. ክፍያውን ከፈጸሙ በኋላ የከፈሉበትን መረጃ የያዘ የማረጋገጫ SMS ይደርስዎታል።\n\n" +
+        "4. የደረሰዎትን SMS ሙሉውን ኮፒ በማድረግ ከታች ባለው የቴሌግራም የጽሑፍ ማስገቢያ ላይ paste በማድረግ ይላኩ።\n\n" +
+        "ማሳሰቢያ፦ ከላይ ወደተሰጠው አካውንት ብቻ ገንዘብ መላክዎን ያረጋግጡ።\n\n" +
+        "👇 የከፈሉበትን ሙሉ SMS እዚህ ይላኩ።";
+      return bot.sendMessage(msg.chat.id, instructions + "\n\nSend /cancel to stop.");
     }
-    if (s.type === "deposit" && s.step === "transactionId") {
-      const transactionId = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (!/^(?:[A-Z0-9]{8,24})$/.test(transactionId) || !(/[A-Z]/.test(transactionId) && /\d/.test(transactionId) || /^\d{10,24}$/.test(transactionId))) {
-        return bot.sendMessage(msg.chat.id, "That transaction ID format does not look valid. Please enter the ID exactly as shown in your payment SMS.");
+    if (s.type === "deposit" && s.step === "confirmationSms") {
+      if (value.length < 12 || value.length > 5000) {
+        return bot.sendMessage(msg.chat.id, "Please paste the complete payment confirmation SMS, exactly as you received it.");
+      }
+      const candidates = [...new Set(
+        [...value.matchAll(/\b[A-Z0-9]{8,24}\b/gi)]
+          .map(match => match[0].toUpperCase())
+          .filter(token => (/[A-Z]/.test(token) && /\d/.test(token)) || /^\d{10,24}$/.test(token))
+      )].reverse();
+      if (!candidates.length) {
+        return bot.sendMessage(msg.chat.id, "I could not find a transaction reference in that message. Please paste the complete payment SMS again.");
+      }
+      let transactionId = null;
+      let payment = null;
+      for (const candidate of candidates) {
+        const found = (await db.ref("incomingPaymentSms/" + candidate).once("value")).val();
+        if (found) { transactionId = candidate; payment = found; break; }
+      }
+      if (!payment) {
+        return bot.sendMessage(msg.chat.id, "❌ We could not match this SMS with a payment notification received by our system. Please make sure the payment SMS was forwarded to us, then paste the complete SMS again.");
+      }
+      if (payment.status === "credited") {
+        await sessionRef(id).remove();
+        return bot.sendMessage(msg.chat.id, payment.creditedTo === id
+          ? "This transaction has already been credited to your account."
+          : "❌ This transaction has already been used.", back());
+      }
+      const paymentTime = Number(payment.transactionTime || payment.receivedAt || 0);
+      if (Number(payment.amount) !== Number(s.amount) || !payment.receivedAt ||
+          Date.now() - paymentTime > 72 * 60 * 60 * 1000 ||
+          paymentTime > Date.now() + 5 * 60 * 1000) {
+        return bot.sendMessage(msg.chat.id, "❌ The SMS does not match your deposit amount, or the payment is outside the 72-hour verification period. Check the amount and paste the correct complete SMS.");
       }
       const paymentRef = db.ref("incomingPaymentSms/" + transactionId);
-      const existingPayment = (await paymentRef.once("value")).val();
-      if (existingPayment && existingPayment.status === "credited") {
-        await sessionRef(id).remove();
-        return bot.sendMessage(msg.chat.id,
-          existingPayment.creditedTo === id
-            ? "This transaction has already been credited to your account."
-            : "❌ This transaction has already been used.",
-          back()
-        );
-      }
-      const claim = await paymentRef.transaction(payment => {
-        if (!payment || Number(payment.amount) !== Number(s.amount)) return;
-        if (!payment.receivedAt || Date.now() - Number(payment.transactionTime || payment.receivedAt) > 72 * 60 * 60 * 1000) return;
-        if (Number(payment.transactionTime || payment.receivedAt) > Date.now() + 5 * 60 * 1000) return;
-        if (payment.status === "available") {
-          payment.status = "claimed";
-          payment.claimedBy = id;
-          payment.claimedAt = Date.now();
-          return payment;
+      const claim = await paymentRef.transaction(current => {
+        if (!current || Number(current.amount) !== Number(s.amount)) return;
+        const time = Number(current.transactionTime || current.receivedAt || 0);
+        if (!current.receivedAt || Date.now() - time > 72 * 60 * 60 * 1000 || time > Date.now() + 5 * 60 * 1000) return;
+        if (current.status === "available") {
+          current.status = "claimed"; current.claimedBy = id; current.claimedAt = Date.now();
+          return current;
         }
-        if (payment.status === "claimed" && payment.claimedBy === id) return payment;
+        if (current.status === "claimed" && current.claimedBy === id) return current;
         return;
       });
-      const payment = claim.snapshot.val();
+      payment = claim.snapshot.val();
       if (!claim.committed || !payment || payment.claimedBy !== id || Number(payment.amount) !== Number(s.amount)) {
-        await sessionRef(id).remove();
-        return bot.sendMessage(msg.chat.id, "❌ We could not verify this deposit. Check the amount and transaction ID, and make sure the payment SMS was forwarded to our server within 72 hours.", back());
+        return bot.sendMessage(msg.chat.id, "❌ This payment SMS has already been used or could not be verified. Please contact support if you believe this is an error.", back());
       }
-
       const creditedBefore = (await playerRef(id).child("depositCredits/" + transactionId).once("value")).exists();
       const credit = await playerRef(id).transaction(player => {
         if (!player) return;
@@ -520,13 +548,11 @@ bot.on("message", async msg => {
         return player;
       });
       if (!credit.committed || !credit.snapshot.child("depositCredits/" + transactionId).exists()) {
-        return bot.sendMessage(msg.chat.id, "Your payment was verified, but wallet credit needs attention. Please contact support and provide transaction ID " + transactionId + ".");
+        return bot.sendMessage(msg.chat.id, "Your payment was verified, but wallet credit needs attention. Please contact support and provide the transaction reference " + transactionId + ".");
       }
       await paymentRef.update({ status: "credited", creditedTo: id, creditedAt: Date.now() });
       await sessionRef(id).remove();
-      if (creditedBefore) {
-        return bot.sendMessage(msg.chat.id, "This transaction has already been credited to your account.", back());
-      }
+      if (creditedBefore) return bot.sendMessage(msg.chat.id, "This transaction has already been credited to your account.", back());
       return bot.sendMessage(msg.chat.id, "✅ Deposit verified! " + Number(s.amount).toFixed(2) + " Br has been added to your balance.", back());
     }
     if (s.type === "withdraw" && s.step === "amount") {
