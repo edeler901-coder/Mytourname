@@ -324,6 +324,95 @@ app.post("/api/player/claim-bingo", requireTelegramAuth, async (req, res) => {
 });
 
 
+// Secure SMS forwarder endpoint. The phone app must send JSON with { "message": "full SMS text" }
+// and the header x-forwarder-secret matching SMS_FORWARDER_SECRET in Render.
+function parseIncomingPaymentSms(message) {
+  const text = String(message || "").trim();
+  if (!text || text.length > 5000) return null;
+
+  const idMatches = [...text.matchAll(/\b(?=[A-Z0-9]{8,20}\b)(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{8,20}\b/gi)];
+  if (!idMatches.length) return null;
+  const transactionId = idMatches[idMatches.length - 1][0].toUpperCase();
+
+  // Prefer the final monetary-looking number before the transaction date.
+  // This avoids interpreting the later account-balance figure as the payment amount.
+  const dateMatch = text.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  const beforeDate = dateMatch ? text.slice(0, dateMatch.index) : text;
+  const numberMatches = [...beforeDate.matchAll(/(?:^|[^\d*])([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)(?![\d*])/g)];
+  if (!numberMatches.length) return null;
+  const amount = Number(numberMatches[numberMatches.length - 1][1].replace(/,/g, ""));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) return null;
+
+  let transactionTime = null;
+  if (dateMatch) {
+    const day = Number(dateMatch[1]);
+    const month = Number(dateMatch[2]);
+    const year = Number(dateMatch[3]);
+    const hour = Number(dateMatch[4]);
+    const minute = Number(dateMatch[5]);
+    const second = Number(dateMatch[6] || 0);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 &&
+        hour <= 23 && minute <= 59 && second <= 59) {
+      // SMS timestamps are local Ethiopia time (UTC+3).
+      transactionTime = Date.UTC(year, month - 1, day, hour - 3, minute, second);
+    }
+  }
+  return { transactionId, amount, transactionTime };
+}
+
+app.post("/api/sms/incoming", async (req, res) => {
+  try {
+    const expectedSecret = process.env.SMS_FORWARDER_SECRET;
+    const suppliedSecret = req.get("x-forwarder-secret");
+    if (!expectedSecret || !suppliedSecret || suppliedSecret !== expectedSecret) {
+      return res.status(401).json({ success: false, error: "Unauthorized forwarder." });
+    }
+
+    const message = req.body && (req.body.message || req.body.text || req.body.sms);
+    const parsed = parseIncomingPaymentSms(message);
+    if (!parsed) {
+      return res.status(400).json({ success: false, error: "SMS could not be parsed." });
+    }
+
+    const now = Date.now();
+    const transactionTime = parsed.transactionTime || now;
+    if (transactionTime > now + 5 * 60 * 1000) {
+      return res.status(400).json({ success: false, error: "SMS date is in the future." });
+    }
+    if (now - transactionTime > 72 * 60 * 60 * 1000) {
+      return res.status(410).json({ success: false, error: "Payment SMS is older than 72 hours." });
+    }
+
+    const safeId = parsed.transactionId.replace(/[^A-Z0-9_-]/g, "");
+    const paymentRef = db.ref("incomingPaymentSms/" + safeId);
+    const saved = await paymentRef.transaction(current => {
+      if (current) return;
+      return {
+        transactionId: parsed.transactionId,
+        amount: parsed.amount,
+        transactionTime,
+        receivedAt: now,
+        status: "available"
+      };
+    });
+
+    if (!saved.committed) {
+      const existing = saved.snapshot.val() || {};
+      if (existing.transactionId === parsed.transactionId &&
+          Number(existing.amount) === parsed.amount &&
+          existing.status !== "available") {
+        return res.status(409).json({ success: false, error: "Transaction was already claimed." });
+      }
+      return res.status(409).json({ success: false, error: "Transaction ID already received." });
+    }
+
+    return res.json({ success: true, received: true, transactionId: parsed.transactionId });
+  } catch (error) {
+    console.error("Incoming SMS processing failed:", error.message);
+    return res.status(500).json({ success: false, error: "Unable to process incoming SMS." });
+  }
+});
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`Bingo Champions running on port ${PORT}`);
