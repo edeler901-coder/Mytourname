@@ -21,7 +21,8 @@ function menu() {
   }
   rows.push(
     [{ text: "💳 Deposit", callback_data: "m:deposit" }, { text: "💸 Withdraw", callback_data: "m:withdraw" }],
-    [{ text: "👤 Profile", callback_data: "m:profile" }, { text: "🔁 Transfer Money", callback_data: "m:transfer" }],
+    [{ text: "💰 Balance", callback_data: "m:balance" }, { text: "👤 Profile", callback_data: "m:profile" }],
+    [{ text: "🔁 Transfer Money", callback_data: "m:transfer" }],
     [{ text: "📖 Instructions", callback_data: "m:instructions" }, { text: "🎮 My Matches", callback_data: "m:matches" }],
     [{ text: "🧾 Transaction History", callback_data: "m:history" }, { text: "🏅 Tournament Results", callback_data: "m:results" }],
     [{ text: "🎁 Bonus & Referrals", callback_data: "m:referrals" }, { text: "🔔 Notifications", callback_data: "m:notifications" }],
@@ -32,24 +33,64 @@ function menu() {
 const back = () => ({ reply_markup: { inline_keyboard: [[{ text: "⬅️ Main Menu", callback_data: "m:home" }]] } });
 const playerRef = id => db.ref("players/" + String(id));
 const sessionRef = id => db.ref("botSessions/" + String(id));
+
+function normalizeEthiopianPhone(value) {
+  const compact = String(value || "").replace(/[\s()-]/g, "");
+  if (/^\+251[79]\d{8}$/.test(compact)) return "0" + compact.slice(4);
+  if (/^251[79]\d{8}$/.test(compact)) return "0" + compact.slice(3);
+  if (/^0[79]\d{8}$/.test(compact)) return compact;
+  return null;
+}
+
+async function isPhoneVerified(id) {
+  const snap = await playerRef(id).once("value");
+  const player = snap.val();
+  return !!(player && player.phoneVerified === true && player.phoneNumber);
+}
+
+async function requestContact(chatId, id, firstName, referrerId) {
+  await sessionRef(id).set({
+    type: "registration",
+    step: "contact",
+    referrerId: referrerId || null,
+    updatedAt: Date.now()
+  });
+  await bot.sendMessage(
+    chatId,
+    "📱 WELCOME TO BINGO CHAMPIONS\n\nBefore using the bot, please verify your phone number. Tap the button below to share your own Telegram contact. We use it to identify your account and make player-to-player transfers safer.",
+    {
+      reply_markup: {
+        keyboard: [[{ text: "📱 Share My Contact", request_contact: true }]],
+        resize_keyboard: true,
+        one_time_keyboard: true
+      }
+    }
+  );
+}
+
 const validAmount = value => {
   const n = Number(String(value).replace(/,/g, "").trim());
   return Number.isSafeInteger(n) && n > 0 && n <= 1000000 ? n : null;
 };
 
-async function createPlayer(user, referrerId) {
+async function createPlayer(user, referrerId, phoneNumber) {
   const id = String(user.id);
   const result = await playerRef(id).transaction(player => {
     if (!player) {
-      player = { telegramId: id, username: user.username || "", firstName: user.first_name || "", balance: 0, createdAt: Date.now(), gamesPlayed: 0, gamesWon: 0 };
+      player = { telegramId: id, username: user.username || "", firstName: user.first_name || "", phoneNumber, phoneVerified: true, phoneVerifiedAt: Date.now(), balance: 0, createdAt: Date.now(), gamesPlayed: 0, gamesWon: 0 };
       if (referrerId && String(referrerId) !== id) player.referredBy = String(referrerId);
       return player;
     }
+    if (player.phoneVerified === true && player.phoneNumber !== phoneNumber) return;
     player.username = user.username || player.username || "";
     player.firstName = user.first_name || player.firstName || "";
+    player.phoneNumber = phoneNumber;
+    player.phoneVerified = true;
+    player.phoneVerifiedAt = player.phoneVerifiedAt || Date.now();
     if (!player.referredBy && referrerId && String(referrerId) !== id) player.referredBy = String(referrerId);
     return player;
   });
+  if (!result.committed) throw new Error("This account already has a different verified phone number.");
   return result.snapshot.val();
 }
 async function sendHome(chatId, firstName) {
@@ -86,14 +127,31 @@ bot.onText(/^\/start(?:\s+(.+))?$/, async (msg, match) => {
   try {
     const payload = (match && match[1] || "").trim();
     const ref = /^ref_(\d+)$/.exec(payload);
-    await createPlayer(msg.from, ref ? ref[1] : null);
-    await sendHome(msg.chat.id, msg.from.first_name);
+    const referrerId = ref ? ref[1] : null;
+    const existingSnap = await playerRef(msg.from.id).once("value");
+    const existing = existingSnap.val();
+
+    if (existing && existing.phoneVerified === true && existing.phoneNumber) {
+      await playerRef(msg.from.id).update({
+        username: msg.from.username || existing.username || "",
+        firstName: msg.from.first_name || existing.firstName || ""
+      });
+      await sendHome(msg.chat.id, msg.from.first_name);
+      return;
+    }
+
+    await requestContact(msg.chat.id, String(msg.from.id), msg.from.first_name, referrerId);
   } catch (e) {
     console.error("Start error:", e);
-    await bot.sendMessage(msg.chat.id, "Unable to open your account. Please try again.");
+    await bot.sendMessage(msg.chat.id, "Unable to start registration. Please try again.");
   }
 });
-bot.onText(/^\/(menu|help)$/, msg => sendHome(msg.chat.id, msg.from.first_name));
+bot.onText(/^\/(menu|help)$/, async msg => {
+  if (!(await isPhoneVerified(msg.from.id))) {
+    return requestContact(msg.chat.id, String(msg.from.id), msg.from.first_name, null);
+  }
+  return sendHome(msg.chat.id, msg.from.first_name);
+});
 bot.onText(/^\/cancel$/, async msg => {
   try {
     const s = await session(msg.from.id);
@@ -109,6 +167,9 @@ bot.onText(/^\/cancel$/, async msg => {
   } catch (e) { console.error("Cancel error:", e); }
 });
 bot.onText(/^\/balance$/, async msg => {
+  if (!(await isPhoneVerified(msg.from.id))) {
+    return requestContact(msg.chat.id, String(msg.from.id), msg.from.first_name, null);
+  }
   const snap = await playerRef(msg.from.id).child("balance").once("value");
   await bot.sendMessage(msg.chat.id, "💰 Your balance: " + Number(snap.val() || 0) + " Br", back());
 });
@@ -119,15 +180,44 @@ bot.on("callback_query", async q => {
   const chatId = q.message.chat.id;
   try {
     await bot.answerCallbackQuery(q.id);
+    if (data.startsWith("m:") || data.startsWith("n:") || data.startsWith("t:")) {
+      if (!(await isPhoneVerified(id))) {
+        await requestContact(chatId, id, q.from.first_name, null);
+        return;
+      }
+    }
+
+    if (data === "t:confirm" || data === "t:cancel") {
+      const current = await session(id);
+      if (!current || current.type !== "transfer" || current.step !== "confirmRecipient") {
+        return bot.sendMessage(chatId, "This transfer session has expired. Please start again.", back());
+      }
+      if (data === "t:cancel") {
+        await sessionRef(id).remove();
+        return bot.sendMessage(chatId, "Transfer cancelled.", back());
+      }
+      await sessionRef(id).update({ step: "transferAmount" });
+      const recipient = (await playerRef(current.recipientId).once("value")).val() || {};
+      const displayName = recipient.username ? "@" + recipient.username : (recipient.firstName || "Player");
+      return bot.sendMessage(chatId, "Enter the amount in Br to send to " + displayName + ".");
+    }
+
     if (data.startsWith("m:")) {
       const action = data.slice(2);
       if (action === "home") return sendHome(chatId, q.from.first_name);
+      if (action === "balance") {
+        const snap = await playerRef(id).child("balance").once("value");
+        return bot.sendMessage(chatId, "💰 Your balance: " + Number(snap.val() || 0) + " Br", back());
+      }
       if (action === "deposit") return begin(chatId, id, "deposit", "💳 Enter the deposit amount in Br.");
       if (action === "withdraw") return begin(chatId, id, "withdraw", "💸 Enter the withdrawal amount in Br.");
-      if (action === "transfer") return begin(chatId, id, "transfer", "🔁 Enter the recipient's Telegram ID.");
+      if (action === "transfer") {
+        await sessionRef(id).set({ type: "transfer", step: "recipientPhone", updatedAt: Date.now() });
+        return bot.sendMessage(chatId, "🔁 Enter the recipient's registered Ethiopian phone number (for example: 0912345678).");
+      }
       if (action === "profile") {
         const p = (await playerRef(id).once("value")).val() || {};
-        return bot.sendMessage(chatId, "👤 PROFILE\n\nName: " + (p.firstName || "Player") + "\nUsername: " + (p.username ? "@" + p.username : "Not set") + "\nTelegram ID: " + id + "\nBalance: " + Number(p.balance || 0) + " Br\nMatches played: " + Number(p.gamesPlayed || 0) + "\nWins: " + Number(p.gamesWon || 0), back());
+        return bot.sendMessage(chatId, "👤 PROFILE\n\nName: " + (p.firstName || "Player") + "\nUsername: " + (p.username ? "@" + p.username : "Not set") + "\nVerified phone: " + (p.phoneNumber || "Not verified") + "\nTelegram ID: " + id + "\nBalance: " + Number(p.balance || 0) + " Br\nMatches played: " + Number(p.gamesPlayed || 0) + "\nWins: " + Number(p.gamesWon || 0), back());
       }
       if (action === "instructions") {
         return bot.sendMessage(chatId, "📖 HOW TO PLAY\n\n1. Open Play Tournament.\n2. Register before registration closes. Entry fee: " + ENTRY_FEE + " Br.\n3. Check My Matches for your group and schedule.\n4. Select an available Bingo board during the 100-second selection window.\n5. The server starts the game and calls numbers automatically.\n6. Press BINGO only when your board has a valid winning pattern.\n\nPrize split: 1st " + PRIZE_SPLIT.first + "%, 2nd " + PRIZE_SPLIT.second + "%, 3rd " + PRIZE_SPLIT.third + "%, house " + PRIZE_SPLIT.house + "%.", back());
@@ -248,11 +338,51 @@ bot.on("callback_query", async q => {
 });
 
 bot.on("message", async msg => {
-  if (!msg.text || msg.text.startsWith("/")) return;
   const id = String(msg.from.id);
   try {
+    if (msg.contact) {
+      const current = await session(id);
+      if (!current || current.type !== "registration" || current.step !== "contact") {
+        return bot.sendMessage(msg.chat.id, "Please send /start first to begin phone verification.");
+      }
+      if (!msg.contact.user_id || String(msg.contact.user_id) !== id) {
+        return bot.sendMessage(msg.chat.id, "❌ Please use the Share My Contact button to share your own Telegram contact. Another person's contact cannot be used.");
+      }
+
+      const phoneNumber = normalizeEthiopianPhone(msg.contact.phone_number);
+      if (!phoneNumber) {
+        return bot.sendMessage(msg.chat.id, "❌ We could not verify this as an Ethiopian mobile number. Please share a number in the format 09xxxxxxxx or 07xxxxxxxx.");
+      }
+
+      const existing = (await playerRef(id).once("value")).val();
+      if (existing && existing.phoneVerified === true && existing.phoneNumber && existing.phoneNumber !== phoneNumber) {
+        return bot.sendMessage(msg.chat.id, "This account already has a different verified phone number. Please contact support to update it.");
+      }
+
+      const indexRef = db.ref("phoneNumberIndex/" + phoneNumber);
+      const claim = await indexRef.transaction(currentId => {
+        if (currentId && String(currentId) !== id) return;
+        return id;
+      });
+
+      if (!claim.committed || String(claim.snapshot.val()) !== id) {
+        return bot.sendMessage(msg.chat.id, "❌ This phone number is already linked to another Bingo Champions account. Please use your own registered number.");
+      }
+
+      await createPlayer(msg.from, current.referrerId, phoneNumber);
+      await sessionRef(id).remove();
+      await bot.sendMessage(msg.chat.id, "✅ Phone number verified and account registered successfully.", {
+        reply_markup: { remove_keyboard: true }
+      });
+      return sendHome(msg.chat.id, msg.from.first_name);
+    }
+
+    if (!msg.text || msg.text.startsWith("/")) return;
     const s = await session(id);
     if (!s) return;
+    if (s.type !== "registration" && !(await isPhoneVerified(id))) {
+      return requestContact(msg.chat.id, id, msg.from.first_name, null);
+    }
     const value = msg.text.trim();
 
     if (s.type === "deposit" && s.step === "amount") {
@@ -291,12 +421,34 @@ bot.on("message", async msg => {
       await notifyAdmin("💸 WITHDRAWAL REQUEST\nPlayer: " + id + "\nAmount: " + s.amount + " Br\nPayment details: " + value + "\nRequest: " + requestId, requestId, true);
       return bot.sendMessage(msg.chat.id, "✅ Withdrawal request submitted. The amount is reserved pending admin review.", back());
     }
-    if (s.type === "transfer" && s.step === "amount") {
-      if (!/^\d{5,20}$/.test(value) || value === id) return bot.sendMessage(msg.chat.id, "Enter a valid recipient Telegram ID, not your own.");
-      const recipient = (await playerRef(value).once("value")).val();
-      if (!recipient) return bot.sendMessage(msg.chat.id, "Player not found. Ask them to open the bot first.");
-      await sessionRef(id).set({ type: "transfer", step: "transferAmount", recipientId: value });
-      return bot.sendMessage(msg.chat.id, "Enter the amount in Br to send to player " + value + ".");
+    if (s.type === "transfer" && s.step === "recipientPhone") {
+      const phoneNumber = normalizeEthiopianPhone(value);
+      if (!phoneNumber) return bot.sendMessage(msg.chat.id, "Enter a valid registered Ethiopian mobile number, such as 0912345678.");
+      const ownPhone = (await playerRef(id).child("phoneNumber").once("value")).val();
+      if (phoneNumber === ownPhone) {
+        return bot.sendMessage(msg.chat.id, "You cannot transfer money to your own account. Enter another player's phone number.");
+      }
+      const indexed = (await db.ref("phoneNumberIndex/" + phoneNumber).once("value")).val();
+      if (!indexed) return bot.sendMessage(msg.chat.id, "No registered player was found with that phone number. Check the number and try again.");
+      const recipientId = String(indexed);
+      const recipient = (await playerRef(recipientId).once("value")).val();
+      if (!recipient || recipient.phoneVerified !== true || recipient.phoneNumber !== phoneNumber) {
+        return bot.sendMessage(msg.chat.id, "This phone number is not linked to an active verified player account.");
+      }
+      const recipientName = recipient.username ? "@" + recipient.username : (recipient.firstName || "Player");
+      await sessionRef(id).set({
+        type: "transfer",
+        step: "confirmRecipient",
+        recipientId,
+        recipientPhone: phoneNumber,
+        updatedAt: Date.now()
+      });
+      return bot.sendMessage(msg.chat.id, "Please confirm the recipient before continuing.\n\nPlayer: " + recipientName + "\nPhone: " + phoneNumber, {
+        reply_markup: { inline_keyboard: [[
+          { text: "✅ Confirm Recipient", callback_data: "t:confirm" },
+          { text: "❌ Cancel", callback_data: "t:cancel" }
+        ]] }
+      });
     }
     if (s.type === "transfer" && s.step === "transferAmount") {
       const amount = validAmount(value);
@@ -332,7 +484,9 @@ bot.on("message", async msg => {
         return bot.sendMessage(msg.chat.id, "Transfer failed. The amount has been returned.");
       }
       await sessionRef(id).remove();
-      await bot.sendMessage(msg.chat.id, "✅ Transfer completed: " + amount + " Br sent to " + s.recipientId + ".", back());
+      const recipient = (await playerRef(s.recipientId).once("value")).val() || {};
+      const recipientName = recipient.username ? "@" + recipient.username : (recipient.firstName || "Player");
+      await bot.sendMessage(msg.chat.id, "✅ Transfer completed: " + amount + " Br sent to " + recipientName + ".", back());
       await bot.sendMessage(s.recipientId, "💰 You received " + amount + " Br from another player.");
     }
   } catch (e) {
@@ -344,7 +498,7 @@ bot.on("message", async msg => {
 bot.notifyPlayer = async (telegramId, message) => {
   try {
     const p = (await playerRef(telegramId).once("value")).val();
-    if (!p || p.notificationsEnabled === false) return false;
+    if (!p || p.phoneVerified !== true || p.notificationsEnabled === false) return false;
     await bot.sendMessage(String(telegramId), message);
     return true;
   } catch (error) {
