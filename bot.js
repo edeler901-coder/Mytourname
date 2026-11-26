@@ -7,7 +7,8 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEBAPP_URL = process.env.WEBAPP_URL;
 const ADMIN_ID = process.env.ADMIN_ID ? String(process.env.ADMIN_ID) : "";
 const SUPPORT_USERNAME = process.env.SUPPORT_USERNAME || "";
-const DEPOSIT_INSTRUCTIONS = process.env.DEPOSIT_INSTRUCTIONS || "Contact the official support team for deposit payment details.";
+const TELEBIRR_ACCOUNT = process.env.TELEBIRR_ACCOUNT || "";
+const CBE_BIRR_ACCOUNT = process.env.CBE_BIRR_ACCOUNT || "";
 const REFERRAL_REWARD = 10;
 
 if (!TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is missing.");
@@ -223,7 +224,16 @@ bot.on("callback_query", async q => {
         const snap = await playerRef(id).child("balance").once("value");
         return bot.sendMessage(chatId, "💰 Your balance: " + Number(snap.val() || 0) + " Br", back());
       }
-      if (action === "deposit") return begin(chatId, id, "deposit", "💳 Enter the deposit amount in Br.");
+      if (action === "deposit") {
+        await sessionRef(id).set({ type: "deposit", step: "provider", updatedAt: Date.now() });
+        return bot.sendMessage(chatId, "💳 Choose your deposit method:", {
+          reply_markup: { inline_keyboard: [
+            [{ text: "📱 Telebirr", callback_data: "d:telebirr" }],
+            [{ text: "🏦 CBE Birr", callback_data: "d:cbe" }],
+            [{ text: "⬅️ Main Menu", callback_data: "m:home" }]
+          ] }
+        });
+      }
       if (action === "withdraw") return begin(chatId, id, "withdraw", "💸 Enter the withdrawal amount in Br.");
       if (action === "transfer") {
         await sessionRef(id).set({ type: "transfer", step: "recipientPhone", updatedAt: Date.now() });
@@ -288,6 +298,23 @@ bot.on("callback_query", async q => {
         }
         return bot.sendMessage(chatId, wins.length ? "🏅 YOUR RECENT WINS\n\n" + wins.join("\n") : "No wins have been recorded for your account yet.", back());
       }
+    }
+
+    if (data === "d:telebirr" || data === "d:cbe") {
+      const current = await session(id);
+      if (!current || current.type !== "deposit" || current.step !== "provider") {
+        return bot.sendMessage(chatId, "This deposit session has expired. Please start again.", back());
+      }
+      const provider = data === "d:telebirr" ? "Telebirr" : "CBE Birr";
+      const account = data === "d:telebirr" ? TELEBIRR_ACCOUNT : CBE_BIRR_ACCOUNT;
+      if (!account) {
+        return bot.sendMessage(chatId, provider + " deposit account is not configured yet. Please contact support.", back());
+      }
+      await sessionRef(id).set({ type: "deposit", step: "amount", provider, updatedAt: Date.now() });
+      return bot.sendMessage(chatId,
+        "💳 DEPOSIT — " + provider + "\n\nSend your payment to:\n" + account +
+        "\n\nEnter the amount you are going to deposit in Br. After paying, enter the transaction ID from your confirmation SMS. Your deposit is verified automatically within 72 hours."
+      );
     }
 
     if (data === "n:on" || data === "n:off") {
@@ -403,19 +430,55 @@ bot.on("message", async msg => {
     const value = msg.text.trim();
 
     if (s.type === "deposit" && s.step === "amount") {
-      const amount = validAmount(value);
-      if (!amount) return bot.sendMessage(msg.chat.id, "Enter a valid whole-number amount in Br.");
-      await sessionRef(id).set({ type: "deposit", step: "reference", amount });
-      return bot.sendMessage(msg.chat.id, DEPOSIT_INSTRUCTIONS + "\n\nAfter paying, send your transaction reference/ID. Send /cancel to stop.");
+      const amount = Number(String(value).replace(/,/g, "").trim());
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000 || Math.round(amount * 100) !== amount * 100) {
+        return bot.sendMessage(msg.chat.id, "Enter a valid amount in Br (up to two decimal places).");
+      }
+      await sessionRef(id).update({ step: "transactionId", amount });
+      return bot.sendMessage(msg.chat.id, "After making the payment, enter the transaction ID from your payment confirmation SMS. Do not send the whole SMS. Send /cancel to stop.");
     }
-    if (s.type === "deposit" && s.step === "reference") {
-      if (value.length < 3 || value.length > 120) return bot.sendMessage(msg.chat.id, "Enter a valid transaction reference.");
-      const requestId = crypto.randomUUID();
-      await db.ref("moneyRequests/" + requestId).set({ type: "deposit", telegramId: id, amount: s.amount, reference: value, status: "pending", createdAt: Date.now() });
-      await db.ref("players/" + id + "/transactions/" + requestId).set({ type: "deposit", amount: s.amount, status: "pending", createdAt: Date.now() });
+    if (s.type === "deposit" && s.step === "transactionId") {
+      const transactionId = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!/^(?=.*[A-Z])(?=.*\\d)[A-Z0-9]{8,20}$/.test(transactionId)) {
+        return bot.sendMessage(msg.chat.id, "That transaction ID format does not look valid. Please enter the ID exactly as shown in your payment SMS.");
+      }
+      const paymentRef = db.ref("incomingPaymentSms/" + transactionId);
+      const claim = await paymentRef.transaction(payment => {
+        if (!payment || payment.status !== "available") return;
+        if (Number(payment.amount) !== Number(s.amount)) return;
+        if (!payment.receivedAt || Date.now() - Number(payment.transactionTime || payment.receivedAt) > 72 * 60 * 60 * 1000) return;
+        if (Number(payment.transactionTime || payment.receivedAt) > Date.now() + 5 * 60 * 1000) return;
+        payment.status = "claimed";
+        payment.claimedBy = id;
+        payment.claimedAt = Date.now();
+        return payment;
+      });
+      let payment = claim.snapshot.val();
+      if (!claim.committed || !payment || payment.claimedBy !== id || Number(payment.amount) !== Number(s.amount)) {
+        await sessionRef(id).remove();
+        return bot.sendMessage(msg.chat.id, "❌ We could not verify this deposit. Check the amount and transaction ID, and make sure the payment SMS was forwarded to our server within 72 hours.", back());
+      }
+
+      const creditedBefore = (await playerRef(id).child("depositCredits/" + transactionId).once("value")).exists();
+      const credit = await playerRef(id).transaction(player => {
+        if (!player) return;
+        player.depositCredits = player.depositCredits || {};
+        if (player.depositCredits[transactionId]) return player;
+        player.balance = Number(player.balance || 0) + Number(s.amount);
+        player.depositCredits[transactionId] = { amount: Number(s.amount), provider: s.provider, creditedAt: Date.now() };
+        player.transactions = player.transactions || {};
+        player.transactions[transactionId] = { type: "deposit", amount: Number(s.amount), provider: s.provider, status: "completed", createdAt: Date.now() };
+        return player;
+      });
+      if (!credit.committed || !credit.snapshot.child("depositCredits/" + transactionId).exists()) {
+        return bot.sendMessage(msg.chat.id, "Your payment was verified, but wallet credit needs attention. Please contact support and provide transaction ID " + transactionId + ".");
+      }
+      await paymentRef.update({ status: "credited", creditedTo: id, creditedAt: Date.now() });
       await sessionRef(id).remove();
-      await notifyAdmin("💳 DEPOSIT REQUEST\nPlayer: " + id + "\nAmount: " + s.amount + " Br\nReference: " + value + "\nRequest: " + requestId, requestId, false);
-      return bot.sendMessage(msg.chat.id, "✅ Deposit request submitted. Your balance updates after admin verification.", back());
+      if (creditedBefore) {
+        return bot.sendMessage(msg.chat.id, "This transaction has already been credited to your account.", back());
+      }
+      return bot.sendMessage(msg.chat.id, "✅ Deposit verified! " + Number(s.amount).toFixed(2) + " Br has been added to your balance.", back());
     }
     if (s.type === "withdraw" && s.step === "amount") {
       const amount = validAmount(value);
