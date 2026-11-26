@@ -200,10 +200,12 @@ async function prepareDailySchedule() {
 }
 
 // Register one simulator using virtual balance only
+
 async function registerSimulator(playerId, tournamentDate) {
   const accountRef = db.ref(`simulators/${playerId}`);
   const registeredAt = Date.now();
 
+  // Deduct the entry fee from the simulator's virtual balance.
   const result = await accountRef.transaction((account) => {
     if (!account || account.isSimulator !== true) return;
 
@@ -239,7 +241,48 @@ async function registerSimulator(playerId, tournamentDate) {
     throw new Error("Simulator registration failed.");
   }
 
-  // Keep a separate simulator tournament list
+  // Add simulator to the MAIN tournament registration list.
+  const tournamentRegistrationRef = db.ref(
+    `tournaments/${tournamentDate}/registrations/${playerId}`
+  );
+
+  const tournamentRegistration = await tournamentRegistrationRef.transaction(
+    (existing) => {
+      if (existing) {
+        if (
+          existing.isSimulator === true &&
+          String(existing.telegramId) === String(playerId)
+        ) {
+          return existing;
+        }
+
+        return;
+      }
+
+      return {
+        telegramId: String(playerId),
+        playerId: String(playerId),
+        username: account.username || account.displayName || String(playerId),
+        tournamentId: tournamentDate,
+        entryFee: ENTRY_FEE,
+        registeredAt: registration.registeredAt,
+        status: "registered",
+        isSimulator: true
+      };
+    }
+  );
+
+  const mainRegistration = tournamentRegistration.snapshot.val();
+
+  if (
+    !mainRegistration ||
+    mainRegistration.isSimulator !== true ||
+    String(mainRegistration.telegramId) !== String(playerId)
+  ) {
+    throw new Error("Could not add simulator to the main tournament list.");
+  }
+
+  // Keep the separate simulator tournament history.
   const registrationRef = db.ref(
     `simulatorTournaments/${tournamentDate}/registrations/${playerId}`
   );
@@ -259,6 +302,7 @@ async function registerSimulator(playerId, tournamentDate) {
 
   return true;
 }
+
 
 // Process due simulator registrations
 async function processDueRegistrations() {
