@@ -363,10 +363,10 @@ function parseIncomingPaymentSms(message) {
   return { transactionId, amount, transactionTime };
 }
 
-app.post("/api/sms/incoming", async (req, res) => {
+app.post(["/api/sms/incoming", "/api/sms/incoming/:secret"], async (req, res) => {
   try {
     const expectedSecret = process.env.SMS_FORWARDER_SECRET;
-    const suppliedSecret = req.get("x-forwarder-secret");
+    const suppliedSecret = req.params.secret || req.get("x-forwarder-secret");
     if (!expectedSecret || !suppliedSecret || suppliedSecret !== expectedSecret) {
       return res.status(401).json({ success: false, error: "Unauthorized forwarder." });
     }
