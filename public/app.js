@@ -55,28 +55,7 @@ function updateTournamentStats(settings) {
   if (playersElement) {
     playersElement.textContent =
       Number(settings.registeredPlayers || 0).toLocaleString("en-US");
-  }
-
-  const breakdownElement = document.getElementById("playerBreakdown");
-  if (breakdownElement) {
-    const humans = Number(settings.humanPlayers || 0);
-    const simulators = Number(settings.simulatorPlayers || 0);
-    breakdownElement.textContent =
-      `${humans.toLocaleString("en-US")} HUMAN · ${simulators.toLocaleString("en-US")} AI OPPONENTS`;
-  }
-
-  const poolElement = document.getElementById("prizePool");
-  if (poolElement) {
-    poolElement.textContent =
-      `${Number(settings.prizePool || 0).toLocaleString("en-US")} BR`;
-  }
-
-  const feeElement = document.getElementById("entryFeeStat");
-  if (feeElement) {
-    feeElement.textContent =
-      `${Number(settings.entryFee || 0).toLocaleString("en-US")} BR`;
-  }
-}
+  }}
 
 // Refresh statistics without changing the registration button state
 async function loadTournamentStats() {
