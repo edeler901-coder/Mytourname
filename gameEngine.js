@@ -1,55 +1,33 @@
 
-const crypto = require("crypto");
 const { db } = require("./firebase");
-const { ensureBoardCatalog } = require("./boardCatalog");
+const {
+  TOTAL_BOARDS,
+  ensureBoardCatalog,
+  getBoardByNumber
+} = require("./boardCatalog");
 
 // =====================================
 // BINGO CHAMPIONS - GAME ENGINE
 // =====================================
 
 const TOTAL_NUMBERS = 75;
-const TOTAL_BOARDS = 100;
 const DRAW_INTERVAL_MS = 5000;
 const BOARD_SELECTION_MS = 100000;
 
-const COLUMNS = {
-  B: [1, 15],
-  I: [16, 30],
-  N: [31, 45],
-  G: [46, 60],
-  O: [61, 75]
-};
+const COLUMNS = ["B", "I", "N", "G", "O"];
 
-function toMillis(value) {
-  if (typeof value === "number") return value;
+let catalogPromise = null;
 
-  const result = new Date(value).getTime();
-
-  if (!Number.isFinite(result)) {
-    throw new Error("Invalid match scheduled time.");
+async function initializeCatalog() {
+  if (!catalogPromise) {
+    catalogPromise = ensureBoardCatalog().catch(error => {
+      catalogPromise = null;
+      throw error;
+    });
   }
 
-  return result;
+  return catalogPromise;
 }
-
-function shuffle(items) {
-  const result = [...items];
-
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1);
-
-    [result[i], result[j]] = [
-      result[j],
-      result[i]
-    ];
-  }
-
-  return result;
-}
-
-// =====================================
-// NUMBER DRAWING
-// =====================================
 
 function generateNumberPool() {
   const numbers = [];
@@ -58,7 +36,12 @@ function generateNumberPool() {
     numbers.push(i);
   }
 
-  return shuffle(numbers);
+  for (let i = numbers.length - 1; i > 0; i--) {
+    const j = require("crypto").randomInt(i + 1);
+    [numbers[i], numbers[j]] = [numbers[j], numbers[i]];
+  }
+
+  return numbers;
 }
 
 function getLetter(number) {
@@ -69,8 +52,21 @@ function getLetter(number) {
   return "O";
 }
 
+function getMatchRef(tournamentDate, matchId) {
+  return db.ref(
+    `tournaments/${tournamentDate}/matches/${matchId}`
+  );
+}
+
+function isAssignedPlayer(match, telegramId) {
+  return Array.isArray(match.players) &&
+    match.players.some(
+      player => String(player.telegramId) === String(telegramId)
+    );
+}
+
 // =====================================
-// MATCH CREATION
+// CREATE MATCH
 // =====================================
 
 async function createMatch(tournamentDate, group) {
@@ -83,54 +79,46 @@ async function createMatch(tournamentDate, group) {
     throw new Error("Invalid match information.");
   }
 
-  // Make sure the permanent boards exist
-  await ensureBoardCatalog();
+  await initializeCatalog();
 
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${group.matchId}`
-  );
+  const matchRef = getMatchRef(tournamentDate, group.matchId);
 
-  const existing = await matchRef.once("value");
+  const result = await matchRef.transaction(current => {
+    // Never overwrite an existing match
+    if (current) return;
 
-  if (existing.exists()) {
-    return existing.val();
+    return {
+      matchId: group.matchId,
+      tournamentDate,
+      groupNumber: group.groupNumber,
+      scheduledAt: group.scheduledAt,
+      status: "scheduled",
+
+      players: group.players,
+
+      boardSelection: {
+        selectedBoards: {},
+        playerBoards: {}
+      },
+
+      drawnNumbers: [],
+      numberPool: generateNumberPool(),
+
+      remainingNumbers: TOTAL_NUMBERS,
+      lastCalledNumber: null,
+      winner: null,
+
+      createdAt: Date.now()
+    };
+  });
+
+  if (!result.committed && !result.snapshot.exists()) {
+    throw new Error("Unable to create match.");
   }
 
-  const scheduledAt = toMillis(group.scheduledAt);
+  console.log(`Match initialized: Group ${group.groupNumber}`);
 
-  const match = {
-    matchId: group.matchId,
-    tournamentDate,
-    groupNumber: group.groupNumber,
-
-    scheduledAt,
-
-    selectionStartsAt: scheduledAt,
-    selectionEndsAt: scheduledAt + BOARD_SELECTION_MS,
-
-    status: "scheduled",
-
-    players: group.players,
-
-    boardSelection: {
-      selectedBoards: {},
-      playerBoards: {}
-    },
-
-    drawnNumbers: [],
-    numberPool: generateNumberPool(),
-
-    winner: null,
-    createdAt: Date.now()
-  };
-
-  await matchRef.set(match);
-
-  console.log(
-    `Match created: Group ${group.groupNumber}`
-  );
-
-  return match;
+  return result.snapshot.val();
 }
 
 // =====================================
@@ -138,42 +126,94 @@ async function createMatch(tournamentDate, group) {
 // =====================================
 
 async function openBoardSelection(tournamentDate, matchId) {
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const matchRef = getMatchRef(tournamentDate, matchId);
 
-  const result = await matchRef.transaction((match) => {
+  const result = await matchRef.transaction(match => {
     if (!match || match.status !== "scheduled") {
       return;
     }
 
-    const now = Date.now();
+    const scheduledTime = new Date(match.scheduledAt).getTime();
 
-    if (now < match.selectionStartsAt) {
-      return;
-    }
-
-    if (now >= match.selectionEndsAt) {
+    if (!Number.isFinite(scheduledTime) || Date.now() < scheduledTime) {
       return;
     }
 
     match.status = "board_selection";
+
+    match.selectionStartedAt = scheduledTime;
+    match.selectionEndsAt = scheduledTime + BOARD_SELECTION_MS;
 
     match.boardSelection = match.boardSelection || {
       selectedBoards: {},
       playerBoards: {}
     };
 
-    match.boardSelection.openedAt = match.selectionStartsAt;
-
     return match;
   });
+
+  if (result.committed) {
+    console.log(`Board selection opened: ${matchId}`);
+  }
 
   return result.committed;
 }
 
 // =====================================
-// SELECT AND RESERVE BOARD
+// GET BOARD SELECTION STATE
+// =====================================
+
+async function getBoardSelectionState(
+  tournamentDate,
+  matchId,
+  telegramId
+) {
+  telegramId = String(telegramId);
+
+  const snapshot = await getMatchRef(
+    tournamentDate,
+    matchId
+  ).once("value");
+
+  const match = snapshot.val();
+
+  if (!match) {
+    throw new Error("Match not found.");
+  }
+
+  if (!isAssignedPlayer(match, telegramId)) {
+    throw new Error("Player is not assigned to this match.");
+  }
+
+  const selection = match.boardSelection || {};
+  const selectedBoards = selection.selectedBoards || {};
+  const playerBoards = selection.playerBoards || {};
+
+  const selectedBoardNumber = playerBoards[telegramId] || null;
+
+  const availableBoards = [];
+
+  for (let number = 1; number <= TOTAL_BOARDS; number++) {
+    const owner = selectedBoards[String(number)];
+
+    availableBoards.push({
+      boardNumber: number,
+      available: !owner || String(owner) === telegramId
+    });
+  }
+
+  return {
+    matchId,
+    status: match.status,
+    selectionStartedAt: match.selectionStartedAt || null,
+    selectionEndsAt: match.selectionEndsAt || null,
+    selectedBoardNumber,
+    availableBoards
+  };
+}
+
+// =====================================
+// SELECT BOARD - ATOMIC RESERVATION
 // =====================================
 
 async function selectBoard(
@@ -190,187 +230,86 @@ async function selectBoard(
     boardNumber < 1 ||
     boardNumber > TOTAL_BOARDS
   ) {
-    throw new Error("Choose a board between 1 and 100.");
+    throw new Error("Invalid board number.");
   }
 
-  // Load the permanent board layout
-  const boardSnapshot = await db
-    .ref(`gameConfig/boardCatalog/${boardNumber}`)
-    .once("value");
+  await initializeCatalog();
 
-  if (!boardSnapshot.exists()) {
-    throw new Error("Permanent board not found.");
-  }
+  const matchRef = getMatchRef(tournamentDate, matchId);
 
-  const permanentBoard = boardSnapshot.val();
+  let rejectionReason = null;
 
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const result = await matchRef.transaction(match => {
+    rejectionReason = null;
 
-  const result = await matchRef.transaction((match) => {
-    if (!match) return;
-
-    const now = Date.now();
-
-    if (
-      now < match.selectionStartsAt ||
-      now >= match.selectionEndsAt
-    ) {
+    if (!match) {
+      rejectionReason = "Match not found.";
       return;
     }
 
-    if (
-      match.status !== "scheduled" &&
-      match.status !== "board_selection"
-    ) {
+    if (match.status !== "board_selection") {
+      rejectionReason = "Board selection is not open.";
       return;
     }
 
-    const isPlayer = match.players.some(
-      player => String(player.telegramId) === telegramId
-    );
+    if (Date.now() >= Number(match.selectionEndsAt)) {
+      rejectionReason = "Board selection has closed.";
+      return;
+    }
 
-    if (!isPlayer) return;
+    if (!isAssignedPlayer(match, telegramId)) {
+      rejectionReason = "Player is not assigned to this match.";
+      return;
+    }
 
     match.boardSelection = match.boardSelection || {
       selectedBoards: {},
       playerBoards: {}
     };
 
-    const selectedBoards =
-      match.boardSelection.selectedBoards || {};
+    const selection = match.boardSelection;
 
-    const playerBoards =
-      match.boardSelection.playerBoards || {};
+    selection.selectedBoards = selection.selectedBoards || {};
+    selection.playerBoards = selection.playerBoards || {};
 
-    // A player can only choose one board
-    if (playerBoards[telegramId]) {
+    if (selection.playerBoards[telegramId]) {
+      rejectionReason = "You have already selected a board.";
       return;
     }
 
-    // A board can only belong to one player in this match
-    if (selectedBoards[String(boardNumber)]) {
+    const boardKey = String(boardNumber);
+    const existingOwner = selection.selectedBoards[boardKey];
+
+    if (existingOwner) {
+      rejectionReason = "This board has already been selected.";
       return;
     }
 
-    // Open the selection phase if the scheduler
-    // has not processed the scheduled time yet.
-    if (match.status === "scheduled") {
-      match.status = "board_selection";
-      match.boardSelection.openedAt = match.selectionStartsAt;
-    }
-
-    selectedBoards[String(boardNumber)] = {
-      telegramId,
-      selectedAt: now
-    };
-
-    playerBoards[telegramId] = boardNumber;
-
-    match.boardSelection.selectedBoards = selectedBoards;
-    match.boardSelection.playerBoards = playerBoards;
-
-    // Store this player's private permanent board
-    match.privateCards = match.privateCards || {};
-
-    match.privateCards[telegramId] = permanentBoard.card;
+    // Both reservations happen in one transaction.
+    selection.selectedBoards[boardKey] = telegramId;
+    selection.playerBoards[telegramId] = boardNumber;
 
     return match;
   });
 
   if (!result.committed) {
-    const latest = result.snapshot.val();
-
-    if (!latest) {
-      throw new Error("Match not found.");
-    }
-
-    if (Date.now() >= latest.selectionEndsAt) {
-      throw new Error("Board selection has closed.");
-    }
-
-    if (latest.boardSelection?.playerBoards?.[telegramId]) {
-      throw new Error("You have already selected a board.");
-    }
-
-    if (
-      latest.boardSelection?.selectedBoards?.[String(boardNumber)]
-    ) {
-      throw new Error("This board has already been selected.");
-    }
-
-    throw new Error("You cannot select a board for this match.");
+    throw new Error(
+      rejectionReason || "Board selection failed. Try again."
+    );
   }
+
+  console.log(
+    `Player ${telegramId} selected board ${boardNumber} in ${matchId}`
+  );
 
   return {
     success: true,
-    boardNumber,
-    card: permanentBoard.card
+    boardNumber
   };
 }
 
 // =====================================
-// GET BOARD SELECTION INFORMATION
-// =====================================
-
-async function getBoardSelectionState(
-  tournamentDate,
-  matchId,
-  telegramId
-) {
-  telegramId = String(telegramId);
-
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
-
-  const snapshot = await matchRef.once("value");
-  const match = snapshot.val();
-
-  if (!match) {
-    throw new Error("Match not found.");
-  }
-
-  const isPlayer = match.players.some(
-    player => String(player.telegramId) === telegramId
-  );
-
-  if (!isPlayer) {
-    throw new Error("Player is not part of this match.");
-  }
-
-  const selectedBoards =
-    match.boardSelection?.selectedBoards || {};
-
-  const playerBoards =
-    match.boardSelection?.playerBoards || {};
-
-  const selectedBoard = playerBoards[telegramId] || null;
-
-  const availableBoards = [];
-
-  for (let number = 1; number <= TOTAL_BOARDS; number++) {
-    if (!selectedBoards[String(number)]) {
-      availableBoards.push(number);
-    }
-  }
-
-  return {
-    matchId: match.matchId,
-    status: match.status,
-    selectionStartsAt: match.selectionStartsAt,
-    selectionEndsAt: match.selectionEndsAt,
-    serverTime: Date.now(),
-    selectedCount: Object.keys(selectedBoards).length,
-    totalPlayers: match.players.length,
-    selectedBoard,
-    availableBoards
-  };
-}
-
-// =====================================
-// GET PLAYER'S PRIVATE BOARD
+// GET PLAYER'S PERMANENT BOARD
 // =====================================
 
 async function getPlayerCard(
@@ -380,35 +319,33 @@ async function getPlayerCard(
 ) {
   telegramId = String(telegramId);
 
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const snapshot = await getMatchRef(
+    tournamentDate,
+    matchId
+  ).once("value");
 
-  const snapshot = await matchRef.once("value");
   const match = snapshot.val();
 
   if (!match) {
     throw new Error("Match not found.");
   }
 
-  const isPlayer = match.players.some(
-    player => String(player.telegramId) === telegramId
-  );
-
-  if (!isPlayer) {
-    throw new Error("Player is not part of this match.");
+  if (!isAssignedPlayer(match, telegramId)) {
+    throw new Error("Player is not assigned to this match.");
   }
 
-  const card = match.privateCards?.[telegramId];
+  const boardNumber =
+    match.boardSelection?.playerBoards?.[telegramId];
 
-  if (!card) {
-    return null;
+  if (!boardNumber) {
+    throw new Error("You have not selected a board.");
   }
+
+  const permanentBoard = await getBoardByNumber(boardNumber);
 
   return {
-    boardNumber:
-      match.boardSelection?.playerBoards?.[telegramId] || null,
-    card
+    boardNumber: permanentBoard.boardNumber,
+    card: permanentBoard.card
   };
 }
 
@@ -417,41 +354,28 @@ async function getPlayerCard(
 // =====================================
 
 async function startMatch(tournamentDate, matchId) {
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const matchRef = getMatchRef(tournamentDate, matchId);
 
-  const result = await matchRef.transaction((match) => {
-    if (
-      !match ||
-      (
-        match.status !== "scheduled" &&
-        match.status !== "board_selection"
-      )
-    ) {
+  const result = await matchRef.transaction(match => {
+    if (!match || match.status !== "board_selection") {
       return;
     }
 
-    if (Date.now() < match.selectionEndsAt) {
+    if (Date.now() < Number(match.selectionEndsAt)) {
       return;
     }
 
     match.status = "in_progress";
-
-    match.startedAt = match.selectionEndsAt;
-    match.boardSelection = match.boardSelection || {};
-    match.boardSelection.closedAt = match.selectionEndsAt;
+    match.startedAt = Date.now();
 
     return match;
   });
 
-  if (!result.committed) {
-    return false;
+  if (result.committed) {
+    console.log(`Match started: ${matchId}`);
   }
 
-  console.log(`Match started: ${matchId}`);
-
-  return true;
+  return result.committed;
 }
 
 // =====================================
@@ -459,22 +383,24 @@ async function startMatch(tournamentDate, matchId) {
 // =====================================
 
 async function callNextNumber(tournamentDate, matchId) {
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const matchRef = getMatchRef(tournamentDate, matchId);
 
-  const matchSnapshot = await matchRef.once("value");
-  const match = matchSnapshot.val();
+  const snapshot = await matchRef.once("value");
+  const match = snapshot.val();
 
   if (!match || match.status !== "in_progress") {
     throw new Error("Match is not active.");
+  }
+
+  if (match.winner) {
+    throw new Error("Match already has a winner.");
   }
 
   let drawnNumber = null;
 
   const poolRef = matchRef.child("numberPool");
 
-  const result = await poolRef.transaction((pool) => {
+  const result = await poolRef.transaction(pool => {
     if (!Array.isArray(pool) || pool.length === 0) {
       return;
     }
@@ -494,7 +420,7 @@ async function callNextNumber(tournamentDate, matchId) {
     calledAt: Date.now()
   };
 
-  await matchRef.child("drawnNumbers").transaction((current) => {
+  await matchRef.child("drawnNumbers").transaction(current => {
     const numbers = Array.isArray(current) ? current : [];
 
     if (numbers.includes(drawnNumber)) {
@@ -507,7 +433,6 @@ async function callNextNumber(tournamentDate, matchId) {
 
   await matchRef.update({
     lastCalledNumber: calledNumber,
-    lastCalledAt: calledNumber.calledAt,
     remainingNumbers: result.snapshot.val().length
   });
 
@@ -523,36 +448,31 @@ function hasWinningPattern(card, calledNumbers) {
 
   function marked(letter, index) {
     const number = card[letter][index];
-
     return number === 0 || called.has(number);
   }
 
-  const letters = ["B", "I", "N", "G", "O"];
-
-  // Horizontal lines
+  // Horizontal rows
   for (let row = 0; row < 5; row++) {
-    if (letters.every(letter => marked(letter, row))) {
+    if (COLUMNS.every(letter => marked(letter, row))) {
       return true;
     }
   }
 
-  // Vertical lines
-  for (const letter of letters) {
-    if (
-      card[letter].every(number =>
-        number === 0 || called.has(number)
-      )
-    ) {
+  // Vertical columns
+  for (const letter of COLUMNS) {
+    if (card[letter].every(
+      number => number === 0 || called.has(number)
+    )) {
       return true;
     }
   }
 
   // Diagonals
-  const diagonalOne = letters.every(
+  const diagonalOne = COLUMNS.every(
     (letter, index) => marked(letter, index)
   );
 
-  const diagonalTwo = letters.every(
+  const diagonalTwo = COLUMNS.every(
     (letter, index) => marked(letter, 4 - index)
   );
 
@@ -584,11 +504,11 @@ async function verifyBingo(
 ) {
   telegramId = String(telegramId);
 
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const snapshot = await getMatchRef(
+    tournamentDate,
+    matchId
+  ).once("value");
 
-  const snapshot = await matchRef.once("value");
   const match = snapshot.val();
 
   if (!match || match.status !== "in_progress") {
@@ -598,28 +518,27 @@ async function verifyBingo(
     };
   }
 
-  const isPlayer = match.players.some(
-    player => String(player.telegramId) === telegramId
-  );
-
-  if (!isPlayer) {
+  if (!isAssignedPlayer(match, telegramId)) {
     return {
       valid: false,
-      reason: "Player is not part of this match."
+      reason: "Player is not assigned to this match."
     };
   }
 
-  const card = match.privateCards?.[telegramId];
+  const boardNumber =
+    match.boardSelection?.playerBoards?.[telegramId];
 
-  if (!card) {
+  if (!boardNumber) {
     return {
       valid: false,
       reason: "Player did not select a board."
     };
   }
 
+  const permanentBoard = await getBoardByNumber(boardNumber);
+
   const valid = hasWinningPattern(
-    card,
+    permanentBoard.card,
     match.drawnNumbers || []
   );
 
@@ -652,35 +571,37 @@ async function claimWinner(
     throw new Error(verification.reason);
   }
 
-  const matchRef = db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
-  );
+  const matchRef = getMatchRef(tournamentDate, matchId);
 
-  const winnerRef = matchRef.child("winner");
+  const result = await matchRef.transaction(match => {
+    if (
+      !match ||
+      match.status !== "in_progress" ||
+      match.winner
+    ) {
+      return;
+    }
 
-  const result = await winnerRef.transaction((winner) => {
-    if (winner) return;
-
-    return {
+    match.winner = {
       telegramId,
       claimedAt: Date.now()
     };
+
+    match.status = "completed";
+    match.completedAt = Date.now();
+
+    return match;
   });
 
   if (!result.committed) {
     throw new Error("This match already has a winner.");
   }
 
-  await matchRef.update({
-    status: "completed",
-    completedAt: Date.now()
-  });
-
   console.log(
     `Winner confirmed: ${telegramId} - Match ${matchId}`
   );
 
-  return result.snapshot.val();
+  return result.snapshot.val().winner;
 }
 
 // =====================================
@@ -688,30 +609,35 @@ async function claimWinner(
 // =====================================
 
 async function getMatchState(tournamentDate, matchId) {
-  const snapshot = await db.ref(
-    `tournaments/${tournamentDate}/matches/${matchId}`
+  const snapshot = await getMatchRef(
+    tournamentDate,
+    matchId
   ).once("value");
 
   const match = snapshot.val();
 
   if (!match) return null;
 
-  const selectedBoards =
-    match.boardSelection?.selectedBoards || {};
-
   return {
     matchId: match.matchId,
     tournamentDate: match.tournamentDate,
     groupNumber: match.groupNumber,
     scheduledAt: match.scheduledAt,
-    selectionStartsAt: match.selectionStartsAt,
-    selectionEndsAt: match.selectionEndsAt,
     status: match.status,
+
+    selectionStartedAt: match.selectionStartedAt || null,
+    selectionEndsAt: match.selectionEndsAt || null,
+
     players: match.players,
-    selectedBoardCount: Object.keys(selectedBoards).length,
+
+    selectedBoardCount: Object.keys(
+      match.boardSelection?.selectedBoards || {}
+    ).length,
+
     drawnNumbers: match.drawnNumbers || [],
     lastCalledNumber: match.lastCalledNumber || null,
-    remainingNumbers: match.remainingNumbers ?? 75,
+    remainingNumbers: match.remainingNumbers ?? TOTAL_NUMBERS,
+
     winner: match.winner || null
   };
 }
@@ -723,16 +649,19 @@ async function getMatchState(tournamentDate, matchId) {
 module.exports = {
   DRAW_INTERVAL_MS,
   BOARD_SELECTION_MS,
-  generateNumberPool,
+
   createMatch,
   openBoardSelection,
-  selectBoard,
   getBoardSelectionState,
+  selectBoard,
   getPlayerCard,
+
   startMatch,
   callNextNumber,
+
   hasWinningPattern,
   verifyBingo,
   claimWinner,
+
   getMatchState
 };
