@@ -205,7 +205,42 @@ async function registerSimulator(playerId, tournamentDate) {
   const accountRef = db.ref(`simulators/${playerId}`);
   const registeredAt = Date.now();
 
-  // Deduct the entry fee from the simulator's virtual balance.
+  // Reserve the main tournament registration BEFORE touching the balance.
+  // This prevents charging an account when another registration already owns the ID.
+  const tournamentRegistrationRef = db.ref(
+    `tournaments/${tournamentDate}/registrations/${playerId}`
+  );
+
+  const reservation = await tournamentRegistrationRef.transaction((existing) => {
+    if (existing) return existing;
+
+    return {
+      telegramId: String(playerId),
+      playerId: String(playerId),
+      tournamentId: tournamentDate,
+      entryFee: ENTRY_FEE,
+      registeredAt,
+      status: "processing",
+      isSimulator: true
+    };
+  });
+
+  const reservedRegistration = reservation.snapshot.val();
+
+  if (
+    !reservedRegistration ||
+    reservedRegistration.isSimulator !== true ||
+    String(reservedRegistration.telegramId) !== String(playerId)
+  ) {
+    throw new Error("A different registration already uses this player ID.");
+  }
+
+  // A completed registration is already paid. Never deduct twice.
+  if (reservedRegistration.status === "registered") {
+    return true;
+  }
+
+  // Deduct the virtual entry fee exactly once.
   const result = await accountRef.transaction((account) => {
     if (!account || account.isSimulator !== true) return;
 
@@ -215,6 +250,8 @@ async function registerSimulator(playerId, tournamentDate) {
       account.simulatorRegistrations = {};
     }
 
+    // A previous attempt may have deducted the fee before it stopped.
+    // In that case, keep the existing record and do not charge again.
     if (account.simulatorRegistrations[tournamentDate]) {
       return account;
     }
@@ -238,48 +275,45 @@ async function registerSimulator(playerId, tournamentDate) {
     account?.simulatorRegistrations?.[tournamentDate];
 
   if (!registration) {
-    throw new Error("Simulator registration failed.");
-  }
-
-  // Add simulator to the MAIN tournament registration list.
-  const tournamentRegistrationRef = db.ref(
-    `tournaments/${tournamentDate}/registrations/${playerId}`
-  );
-
-  const tournamentRegistration = await tournamentRegistrationRef.transaction(
-    (existing) => {
-      if (existing) {
-        if (
-          existing.isSimulator === true &&
-          String(existing.telegramId) === String(playerId)
-        ) {
-          return existing;
-        }
-
-        return;
+    // Remove only our unfinished reservation so a later retry can proceed.
+    await tournamentRegistrationRef.transaction((current) => {
+      if (
+        current &&
+        current.isSimulator === true &&
+        current.status === "processing" &&
+        String(current.telegramId) === String(playerId)
+      ) {
+        return null;
       }
 
-      return {
-        telegramId: String(playerId),
-        playerId: String(playerId),
-        username: account.username || account.displayName || String(playerId),
-        tournamentId: tournamentDate,
-        entryFee: ENTRY_FEE,
-        registeredAt: registration.registeredAt,
-        status: "registered",
-        isSimulator: true
-      };
+      return current;
+    });
+
+    throw new Error("Simulator registration failed: insufficient balance or invalid account.");
+  }
+
+  // Finalize the main registration only after the virtual payment is confirmed.
+  const finalized = await tournamentRegistrationRef.transaction((current) => {
+    if (
+      !current ||
+      current.isSimulator !== true ||
+      String(current.telegramId) !== String(playerId)
+    ) {
+      return;
     }
-  );
 
-  const mainRegistration = tournamentRegistration.snapshot.val();
+    current.status = "registered";
+    current.entryFee = ENTRY_FEE;
+    current.registeredAt = registration.registeredAt;
+    current.completedAt = Date.now();
 
-  if (
-    !mainRegistration ||
-    mainRegistration.isSimulator !== true ||
-    String(mainRegistration.telegramId) !== String(playerId)
-  ) {
-    throw new Error("Could not add simulator to the main tournament list.");
+    return current;
+  });
+
+  const mainRegistration = finalized.snapshot.val();
+
+  if (!mainRegistration || mainRegistration.status !== "registered") {
+    throw new Error("Simulator payment recorded, but tournament registration needs retry.");
   }
 
   // Keep the separate simulator tournament history.
