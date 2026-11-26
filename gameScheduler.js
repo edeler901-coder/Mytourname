@@ -1,5 +1,6 @@
 
 const { db } = require("./firebase");
+const bot = require("./bot");
 
 const {
   DRAW_INTERVAL_MS,
@@ -111,6 +112,18 @@ async function processScheduledMatches() {
 
         if (!state) continue;
 
+        if (state.status === "board_selection") {
+          const noticeRef = db.ref("tournaments/" + tournamentDate + "/matches/" + group.matchId + "/notificationFlags/selection");
+          const notice = await noticeRef.transaction(current => current || Date.now());
+          if (notice.committed) {
+            for (const player of (state.players || [])) {
+              if (player && player.telegramId) {
+                await bot.notifyPlayer(player.telegramId, "🎮 Your Group " + group.groupNumber + " match is open. Choose your Bingo board now. You have 100 seconds.");
+              }
+            }
+          }
+        }
+
         // Start only after board selection has closed.
         if (state.status === "board_selection") {
           if (
@@ -125,6 +138,18 @@ async function processScheduledMatches() {
               tournamentDate,
               group.matchId
             );
+          }
+        }
+
+        if (state && state.status === "in_progress") {
+          const noticeRef = db.ref("tournaments/" + tournamentDate + "/matches/" + group.matchId + "/notificationFlags/started");
+          const notice = await noticeRef.transaction(current => current || Date.now());
+          if (notice.committed) {
+            for (const player of (state.players || [])) {
+              if (player && player.telegramId) {
+                await bot.notifyPlayer(player.telegramId, "🔔 Your Group " + group.groupNumber + " Bingo match has started. Good luck!");
+              }
+            }
           }
         }
 
