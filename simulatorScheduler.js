@@ -6,6 +6,7 @@ const TIME_ZONE = "Africa/Addis_Ababa";
 const MIN_SIMS = 55;
 const MAX_SIMS = 75;
 const ENTRY_FEE = 200;
+const ADMIN_ID = String(process.env.ADMIN_ID || "");
 const CHECK_INTERVAL = 30000;
 
 let schedulerStarted = false;
@@ -165,8 +166,6 @@ async function prepareDailySchedule() {
       account &&
       account.isSimulator === true &&
       account.accountType === "simulator" &&
-      Number.isFinite(account.balance) &&
-      account.balance >= ENTRY_FEE &&
       !(
         account.simulatorRegistrations &&
         account.simulatorRegistrations[tournamentDate]
@@ -201,142 +200,171 @@ async function prepareDailySchedule() {
 
 // Register one simulator using virtual balance only
 
-async function registerSimulator(playerId, tournamentDate) {
+async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE) {
   const accountRef = db.ref(`simulators/${playerId}`);
   const registeredAt = Date.now();
+  const fee = Number(entryFee);
 
-  // Reserve the main tournament registration BEFORE touching the balance.
-  // This prevents charging an account when another registration already owns the ID.
+  if (!ADMIN_ID) {
+    throw new Error("ADMIN_ID is not configured; simulator entries cannot be funded.");
+  }
+  if (!Number.isFinite(fee) || fee <= 0) {
+    throw new Error("Invalid simulator entry fee.");
+  }
+
   const tournamentRegistrationRef = db.ref(
     `tournaments/${tournamentDate}/registrations/${playerId}`
   );
 
-  const reservation = await tournamentRegistrationRef.transaction((existing) => {
+  const reservation = await tournamentRegistrationRef.transaction(existing => {
     if (existing) return existing;
-
     return {
       telegramId: String(playerId),
       playerId: String(playerId),
       tournamentId: tournamentDate,
-      entryFee: ENTRY_FEE,
+      entryFee: fee,
       registeredAt,
       status: "processing",
       isSimulator: true
     };
   });
 
-  const reservedRegistration = reservation.snapshot.val();
-
-  if (
-    !reservedRegistration ||
-    reservedRegistration.isSimulator !== true ||
-    String(reservedRegistration.telegramId) !== String(playerId)
-  ) {
+  const reserved = reservation.snapshot.val();
+  if (!reserved || reserved.isSimulator !== true ||
+      String(reserved.telegramId) !== String(playerId)) {
     throw new Error("A different registration already uses this player ID.");
   }
+  if (reserved.status === "registered") return true;
 
-  // A completed registration is already paid. Never deduct twice.
-  if (reservedRegistration.status === "registered") {
-    return true;
-  }
-
-  // Deduct the virtual entry fee exactly once.
-  const result = await accountRef.transaction((account) => {
+  // Existing synthetic 10,000 Br balances are archived and made non-spendable.
+  const prepared = await accountRef.transaction(account => {
     if (!account || account.isSimulator !== true) return;
-
-    if (!Number.isFinite(account.balance)) return;
-
-    if (!account.simulatorRegistrations) {
-      account.simulatorRegistrations = {};
+    if (account.fundingVersion !== 1) {
+      account.legacyVirtualBalance = Number(account.balance || 0);
+      account.balance = 0;
+      account.fundingVersion = 1;
     }
-
-    // A previous attempt may have deducted the fee before it stopped.
-    // In that case, keep the existing record and do not charge again.
-    if (account.simulatorRegistrations[tournamentDate]) {
-      return account;
-    }
-
-    if (account.balance < ENTRY_FEE) return;
-
-    account.balance -= ENTRY_FEE;
-
-    account.simulatorRegistrations[tournamentDate] = {
-      tournamentDate,
-      entryFee: ENTRY_FEE,
-      registeredAt,
-      status: "registered"
-    };
-
+    account.simulatorRegistrations = account.simulatorRegistrations || {};
     return account;
   });
 
-  const account = result.snapshot.val();
-  const registration =
-    account?.simulatorRegistrations?.[tournamentDate];
+  let account = prepared.snapshot.val();
+  if (!account || account.isSimulator !== true) {
+    throw new Error("Simulator account not found or invalid.");
+  }
 
+  let registration = account.simulatorRegistrations?.[tournamentDate];
+  const adminTransactionId = `sim_entry_${tournamentDate}_${playerId}`;
+
+  // Debit the configured administrator wallet once per simulator per tournament.
   if (!registration) {
-    // Remove only our unfinished reservation so a later retry can proceed.
-    await tournamentRegistrationRef.transaction((current) => {
-      if (
-        current &&
-        current.isSimulator === true &&
-        current.status === "processing" &&
-        String(current.telegramId) === String(playerId)
-      ) {
-        return null;
+    const adminRef = db.ref(`players/${ADMIN_ID}`);
+    const charge = await adminRef.transaction(admin => {
+      if (!admin || !Number.isFinite(Number(admin.balance))) return;
+      admin.transactions = admin.transactions || {};
+      const prior = admin.transactions[adminTransactionId];
+      if (prior) {
+        if (prior.type === "simulator_entry_fee" &&
+            Number(prior.amount) === fee &&
+            prior.status === "completed") return admin;
+        return;
       }
+      if (Number(admin.balance) < fee) return;
+      admin.balance = Number(admin.balance) - fee;
+      admin.transactions[adminTransactionId] = {
+        type: "simulator_entry_fee",
+        amount: fee,
+        playerId: String(playerId),
+        tournamentDate,
+        status: "completed",
+        createdAt: Date.now()
+      };
+      return admin;
+    });
 
+    const admin = charge.snapshot.val();
+    const debit = admin?.transactions?.[adminTransactionId];
+    if (!debit || debit.type !== "simulator_entry_fee" ||
+        Number(debit.amount) !== fee || debit.status !== "completed") {
+      await tournamentRegistrationRef.transaction(current => {
+        if (current && current.status === "processing" &&
+            current.isSimulator === true &&
+            String(current.telegramId) === String(playerId)) return null;
+        return current;
+      });
+      throw new Error("Admin wallet has insufficient balance or the simulator entry debit failed.");
+    }
+
+    const saved = await accountRef.transaction(current => {
+      if (!current || current.isSimulator !== true) return;
+      current.simulatorRegistrations = current.simulatorRegistrations || {};
+      if (current.simulatorRegistrations[tournamentDate]) return current;
+      current.simulatorRegistrations[tournamentDate] = {
+        tournamentDate,
+        entryFee: fee,
+        registeredAt,
+        status: "registered",
+        paymentSource: "admin_wallet",
+        adminTransactionId
+      };
       return current;
     });
 
-    throw new Error("Simulator registration failed: insufficient balance or invalid account.");
+    account = saved.snapshot.val();
+    registration = account?.simulatorRegistrations?.[tournamentDate];
+
+    if (!registration) {
+      // Refund exactly once if the simulator registration could not be recorded.
+      await adminRef.transaction(admin => {
+        const tx = admin?.transactions?.[adminTransactionId];
+        if (!admin || !tx || tx.status !== "completed") return admin;
+        admin.balance = Number(admin.balance || 0) + fee;
+        tx.status = "refunded";
+        tx.refundedAt = Date.now();
+        return admin;
+      });
+      await tournamentRegistrationRef.transaction(current => {
+        if (current && current.status === "processing" &&
+            current.isSimulator === true) return null;
+        return current;
+      });
+      throw new Error("Simulator entry was refunded because its registration could not be saved.");
+    }
   }
 
-  // Finalize the main registration only after the virtual payment is confirmed.
-  const finalized = await tournamentRegistrationRef.transaction((current) => {
-    if (
-      !current ||
-      current.isSimulator !== true ||
-      String(current.telegramId) !== String(playerId)
-    ) {
-      return;
-    }
-
+  const finalized = await tournamentRegistrationRef.transaction(current => {
+    if (!current || current.isSimulator !== true ||
+        String(current.telegramId) !== String(playerId)) return;
     current.status = "registered";
-    current.entryFee = ENTRY_FEE;
-    current.registeredAt = registration.registeredAt;
+    current.entryFee = fee;
+    current.registeredAt = registration.registeredAt || registeredAt;
     current.completedAt = Date.now();
-
+    current.paymentSource = "admin_wallet";
+    current.adminTransactionId = registration.adminTransactionId || adminTransactionId;
     return current;
   });
 
   const mainRegistration = finalized.snapshot.val();
-
   if (!mainRegistration || mainRegistration.status !== "registered") {
-    throw new Error("Simulator payment recorded, but tournament registration needs retry.");
+    throw new Error("Simulator entry was charged, but registration finalization needs recovery.");
   }
 
-  // Keep the separate simulator tournament history.
   const registrationRef = db.ref(
     `simulatorTournaments/${tournamentDate}/registrations/${playerId}`
   );
-
-  await registrationRef.transaction((existing) => {
-    if (existing) return existing;
-
-    return {
-      playerId,
-      username: account.username || account.displayName || playerId,
-      tournamentDate,
-      entryFee: ENTRY_FEE,
-      registeredAt: registration.registeredAt,
-      status: "registered"
-    };
-  });
+  await registrationRef.transaction(existing => existing || ({
+    playerId,
+    username: account.username || account.displayName || playerId,
+    tournamentDate,
+    entryFee: fee,
+    registeredAt: registration.registeredAt || registeredAt,
+    paymentSource: "admin_wallet",
+    adminTransactionId: registration.adminTransactionId || adminTransactionId,
+    status: "registered"
+  }));
 
   return true;
 }
-
 
 // Process due simulator registrations
 async function processDueRegistrations() {
@@ -408,7 +436,8 @@ async function processDueRegistrations() {
       try {
         await registerSimulator(
           task.playerId,
-          schedule.tournamentDate
+          schedule.tournamentDate,
+          Number(tournament.entryFee || ENTRY_FEE)
         );
 
         await taskRef.update({
