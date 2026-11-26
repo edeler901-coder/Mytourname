@@ -192,13 +192,13 @@ async function prepareDailySchedule() {
   });
 
   console.log(
-    `Prepared ${result.snapshot.val().dailyTotal} simulator test registrations for ${tournamentDate}.`
+    `Prepared ${result.snapshot.val().dailyTotal} simulator registrations for ${tournamentDate}.`
   );
 
   return result.snapshot.val();
 }
 
-// Register one simulator using virtual balance only
+// Register one simulator using the administrator wallet.
 
 async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE) {
   const accountRef = db.ref(`simulators/${playerId}`);
@@ -446,7 +446,7 @@ async function processDueRegistrations() {
         });
 
         console.log(
-          `Simulator test registration completed: ${task.playerId}`
+          `Simulator registration completed: ${task.playerId}`
         );
 
       } catch (error) {
@@ -473,7 +473,7 @@ function startSimulatorScheduler() {
 
   schedulerStarted = true;
 
-  console.log("Simulator test scheduler started.");
+  console.log("Simulator registration scheduler started.");
 
   processDueRegistrations();
 
