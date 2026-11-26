@@ -85,8 +85,20 @@ app.get("/api/tournament/settings", async (req, res) => {
       .once("value");
 
     const registrations = registrationsSnapshot.val() || {};
-    const registeredPlayers = Object.keys(registrations).length;
-    const grossContributions = registeredPlayers * ENTRY_FEE;
+    const confirmedRegistrations = Object.values(registrations).filter(
+      registration => registration && registration.status === "registered"
+    );
+    const registeredPlayers = confirmedRegistrations.length;
+    const entryFee = Number(
+      (await db.ref(`tournaments/${tournamentDate}/entryFee`).once("value")).val() || ENTRY_FEE
+    );
+    const grossContributions = confirmedRegistrations.reduce(
+      (total, registration) => total + Number(registration.entryFee || entryFee),
+      0
+    );
+    const simulatorPlayers = confirmedRegistrations.filter(
+      registration => registration.isSimulator === true
+    ).length;
     const prizePercentage =
       Number(PRIZE_SPLIT.first || 0) +
       Number(PRIZE_SPLIT.second || 0) +
@@ -94,11 +106,13 @@ app.get("/api/tournament/settings", async (req, res) => {
     const prizePool = grossContributions * prizePercentage / 100;
 
     return res.json({
-      entryFee: ENTRY_FEE,
+      entryFee,
       totalGroups: TOTAL_GROUPS,
       prizeSplit: PRIZE_SPLIT,
       tournamentDate,
       registeredPlayers,
+      simulatorPlayers,
+      humanPlayers: registeredPlayers - simulatorPlayers,
       grossContributions,
       prizePool
     });
