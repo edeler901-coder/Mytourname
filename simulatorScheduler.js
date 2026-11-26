@@ -270,6 +270,43 @@ async function registerSimulator(playerId, tournamentDate, entryFee) {
     if (!isMatchingSimulatorRegistration(existingRegistration, id)) {
       throw new Error("A non-simulator registration already uses this player ID.");
     }
+
+    const existingAccountSnapshot = await accountRef.once("value");
+    const existingAccount = existingAccountSnapshot.val();
+
+    if (!isSimulatorAccount(existingAccount)) {
+      throw new Error("Registered simulator account could not be verified.");
+    }
+
+    const recordedTransactionId =
+      existingRegistration.simulatorTransactionId || transactionId;
+    const recordedPayment =
+      existingAccount.simulatorTransactions &&
+      existingAccount.simulatorTransactions[recordedTransactionId];
+    const recordedSimulatorEntry =
+      existingAccount.simulatorRegistrations &&
+      existingAccount.simulatorRegistrations[tournamentDate];
+
+    const paymentVerified = Boolean(
+      recordedPayment &&
+      recordedPayment.type === "simulator_entry_fee" &&
+      Number(recordedPayment.amount) === fee &&
+      recordedPayment.status === "completed"
+    );
+
+    const legacyEntryVerified = Boolean(
+      recordedSimulatorEntry &&
+      recordedSimulatorEntry.status === "registered" &&
+      recordedSimulatorEntry.paymentSource === "simulator_wallet" &&
+      Number(recordedSimulatorEntry.entryFee) === fee
+    );
+
+    if (!paymentVerified && !legacyEntryVerified) {
+      throw new Error(
+        "Simulator is already registered, but its wallet payment record cannot be verified. No second charge was attempted."
+      );
+    }
+
     return { status: "already_registered" };
   }
 
