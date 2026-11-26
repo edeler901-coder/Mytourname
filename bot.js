@@ -380,7 +380,10 @@ bot.on("message", async msg => {
     if (!msg.text || msg.text.startsWith("/")) return;
     const s = await session(id);
     if (!s) return;
-    if (s.type !== "registration" && !(await isPhoneVerified(id))) {
+    if (s.type === "registration" && s.step === "contact") {
+      return bot.sendMessage(msg.chat.id, "Please tap the 📱 Share My Contact button below to verify your own phone number.");
+    }
+    if (!(await isPhoneVerified(id))) {
       return requestContact(msg.chat.id, id, msg.from.first_name, null);
     }
     const value = msg.text.trim();
