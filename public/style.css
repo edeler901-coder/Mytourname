@@ -83,20 +83,20 @@ body {
 /* WELCOME */
 
 .welcome {
-  padding: 18px 4px 25px;
+  padding: 8px 4px 12px;
 }
 
 .small-title {
   color: var(--gold);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 800;
-  letter-spacing: 3px;
-  margin-bottom: 13px;
+  letter-spacing: 2px;
+  margin-bottom: 6px;
 }
 
 .welcome h2 {
-  font-size: 35px;
-  line-height: 1.15;
+  font-size: 18px;
+  line-height: 1.2;
   font-weight: 900;
 }
 
@@ -106,9 +106,9 @@ body {
 
 .description {
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
-  margin-top: 12px;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 6px;
   max-width: 300px;
 }
 
@@ -334,7 +334,7 @@ body {
 
 @media (max-width: 360px) {
   .welcome h2 {
-    font-size: 30px;
+    font-size: 18px;
   }
 
   .tournament-card h2 {
