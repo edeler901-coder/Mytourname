@@ -6,7 +6,6 @@ const TIME_ZONE = "Africa/Addis_Ababa";
 const MIN_SIMS = 55;
 const MAX_SIMS = 75;
 const ENTRY_FEE = 200;
-const ADMIN_ID = String(process.env.ADMIN_ID || "");
 const CHECK_INTERVAL = 30000;
 
 let schedulerStarted = false;
@@ -155,20 +154,11 @@ async function prepareDailySchedule() {
     return null;
   }
 
-  if (!ADMIN_ID) {
-    console.error("ADMIN_ID is not configured; simulator registrations are paused.");
-    return null;
-  }
-
   const entryFee = Number(tournament.entryFee || ENTRY_FEE);
   if (!Number.isFinite(entryFee) || entryFee <= 0) {
     console.error("Tournament entry fee is invalid; simulator registrations are paused.");
     return null;
   }
-
-  const adminSnapshot = await db.ref(`players/${ADMIN_ID}`).once("value");
-  const adminBalance = Number(adminSnapshot.val()?.balance || 0);
-  const affordableCount = Math.floor(adminBalance / entryFee);
 
   const simulatorSnapshot = await db
     .ref("simulators")
@@ -181,6 +171,8 @@ async function prepareDailySchedule() {
       account &&
       account.isSimulator === true &&
       account.accountType === "simulator" &&
+      Number.isFinite(Number(account.balance)) &&
+      Number(account.balance) >= entryFee &&
       !(
         account.simulatorRegistrations &&
         account.simulatorRegistrations[tournamentDate]
@@ -188,14 +180,9 @@ async function prepareDailySchedule() {
     )
     .map(([id]) => id);
 
-  const affordableIds = shuffle(eligibleIds).slice(
-    0,
-    Math.min(eligibleIds.length, affordableCount)
-  );
-
-  if (affordableIds.length < MIN_SIMS) {
+  if (eligibleIds.length < MIN_SIMS) {
     console.error(
-      `Only ${eligibleIds.length} eligible simulators. At least ${MIN_SIMS} are required.`
+      `Only ${eligibleIds.length} funded and eligible simulators. At least ${MIN_SIMS} are required.`
     );
     return null;
   }
@@ -203,7 +190,7 @@ async function prepareDailySchedule() {
   const schedule = createDailySchedule(
     registrationDate,
     tournamentDate,
-    affordableIds
+    eligibleIds
   );
 
   const result = await scheduleRef.transaction((current) => {
@@ -218,16 +205,12 @@ async function prepareDailySchedule() {
   return result.snapshot.val();
 }
 
-// Register one simulator using the administrator wallet.
-
+// Register one simulator using its own funded simulator account.
 async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE) {
   const accountRef = db.ref(`simulators/${playerId}`);
   const registeredAt = Date.now();
   const fee = Number(entryFee);
 
-  if (!ADMIN_ID) {
-    throw new Error("ADMIN_ID is not configured; simulator entries cannot be funded.");
-  }
   if (!Number.isFinite(fee) || fee <= 0) {
     throw new Error("Invalid simulator entry fee.");
   }
@@ -256,100 +239,73 @@ async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE)
   }
   if (reserved.status === "registered") return true;
 
-  // Existing synthetic 10,000 Br balances are archived and made non-spendable.
-  const prepared = await accountRef.transaction(account => {
-    if (!account || account.isSimulator !== true) return;
-    if (account.fundingVersion !== 1) {
-      account.legacyVirtualBalance = Number(account.balance || 0);
-      account.balance = 0;
-      account.fundingVersion = 1;
+  const simulatorTransactionId = `sim_entry_${tournamentDate}_${playerId}`;
+
+  // Debit the simulator's own balance once per tournament.
+  const charge = await accountRef.transaction(account => {
+    if (!account || account.isSimulator !== true ||
+        account.accountType !== "simulator") return;
+
+    account.simulatorTransactions = account.simulatorTransactions || {};
+    const prior = account.simulatorTransactions[simulatorTransactionId];
+
+    if (prior) {
+      if (prior.type === "simulator_entry_fee" &&
+          Number(prior.amount) === fee &&
+          prior.status === "completed") return account;
+      return;
     }
-    account.simulatorRegistrations = account.simulatorRegistrations || {};
+
+    const balance = Number(account.balance);
+    if (!Number.isFinite(balance) || balance < fee) return;
+
+    account.balance = balance - fee;
+    account.simulatorTransactions[simulatorTransactionId] = {
+      type: "simulator_entry_fee",
+      amount: fee,
+      tournamentDate,
+      status: "completed",
+      createdAt: Date.now()
+    };
+
     return account;
   });
 
-  let account = prepared.snapshot.val();
-  if (!account || account.isSimulator !== true) {
-    throw new Error("Simulator account not found or invalid.");
-  }
+  let account = charge.snapshot.val();
+  const debit = account?.simulatorTransactions?.[simulatorTransactionId];
 
-  let registration = account.simulatorRegistrations?.[tournamentDate];
-  const adminTransactionId = `sim_entry_${tournamentDate}_${playerId}`;
-
-  // Debit the configured administrator wallet once per simulator per tournament.
-  if (!registration) {
-    const adminRef = db.ref(`players/${ADMIN_ID}`);
-    const charge = await adminRef.transaction(admin => {
-      if (!admin || !Number.isFinite(Number(admin.balance))) return;
-      admin.transactions = admin.transactions || {};
-      const prior = admin.transactions[adminTransactionId];
-      if (prior) {
-        if (prior.type === "simulator_entry_fee" &&
-            Number(prior.amount) === fee &&
-            prior.status === "completed") return admin;
-        return;
-      }
-      if (Number(admin.balance) < fee) return;
-      admin.balance = Number(admin.balance) - fee;
-      admin.transactions[adminTransactionId] = {
-        type: "simulator_entry_fee",
-        amount: fee,
-        playerId: String(playerId),
-        tournamentDate,
-        status: "completed",
-        createdAt: Date.now()
-      };
-      return admin;
-    });
-
-    const admin = charge.snapshot.val();
-    const debit = admin?.transactions?.[adminTransactionId];
-    if (!debit || debit.type !== "simulator_entry_fee" ||
-        Number(debit.amount) !== fee || debit.status !== "completed") {
-      await tournamentRegistrationRef.transaction(current => {
-        if (current && current.status === "processing" &&
-            current.isSimulator === true &&
-            String(current.telegramId) === String(playerId)) return null;
-        return current;
-      });
-      throw new Error("Admin wallet has insufficient balance or the simulator entry debit failed.");
-    }
-
-    const saved = await accountRef.transaction(current => {
-      if (!current || current.isSimulator !== true) return;
-      current.simulatorRegistrations = current.simulatorRegistrations || {};
-      if (current.simulatorRegistrations[tournamentDate]) return current;
-      current.simulatorRegistrations[tournamentDate] = {
-        tournamentDate,
-        entryFee: fee,
-        registeredAt,
-        status: "registered",
-        paymentSource: "admin_wallet",
-        adminTransactionId
-      };
+  if (!debit || debit.type !== "simulator_entry_fee" ||
+      Number(debit.amount) !== fee || debit.status !== "completed") {
+    await tournamentRegistrationRef.transaction(current => {
+      if (current && current.status === "processing" &&
+          current.isSimulator === true &&
+          String(current.telegramId) === String(playerId)) return null;
       return current;
     });
+    throw new Error("Simulator has insufficient balance or its entry debit failed.");
+  }
 
-    account = saved.snapshot.val();
-    registration = account?.simulatorRegistrations?.[tournamentDate];
+  const saved = await accountRef.transaction(current => {
+    if (!current || current.isSimulator !== true) return;
+    current.simulatorRegistrations = current.simulatorRegistrations || {};
+    if (current.simulatorRegistrations[tournamentDate]) return current;
 
-    if (!registration) {
-      // Refund exactly once if the simulator registration could not be recorded.
-      await adminRef.transaction(admin => {
-        const tx = admin?.transactions?.[adminTransactionId];
-        if (!admin || !tx || tx.status !== "completed") return admin;
-        admin.balance = Number(admin.balance || 0) + fee;
-        tx.status = "refunded";
-        tx.refundedAt = Date.now();
-        return admin;
-      });
-      await tournamentRegistrationRef.transaction(current => {
-        if (current && current.status === "processing" &&
-            current.isSimulator === true) return null;
-        return current;
-      });
-      throw new Error("Simulator entry was refunded because its registration could not be saved.");
-    }
+    current.simulatorRegistrations[tournamentDate] = {
+      tournamentDate,
+      entryFee: fee,
+      registeredAt,
+      status: "registered",
+      paymentSource: "simulator_wallet",
+      simulatorTransactionId
+    };
+    return current;
+  });
+
+  account = saved.snapshot.val();
+  const registration = account?.simulatorRegistrations?.[tournamentDate];
+
+  if (!registration) {
+    throw new Error("Simulator entry was charged, but registration needs recovery.");
   }
 
   const finalized = await tournamentRegistrationRef.transaction(current => {
@@ -359,8 +315,8 @@ async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE)
     current.entryFee = fee;
     current.registeredAt = registration.registeredAt || registeredAt;
     current.completedAt = Date.now();
-    current.paymentSource = "admin_wallet";
-    current.adminTransactionId = registration.adminTransactionId || adminTransactionId;
+    current.paymentSource = "simulator_wallet";
+    current.simulatorTransactionId = registration.simulatorTransactionId || simulatorTransactionId;
     return current;
   });
 
@@ -378,8 +334,8 @@ async function registerSimulator(playerId, tournamentDate, entryFee = ENTRY_FEE)
     tournamentDate,
     entryFee: fee,
     registeredAt: registration.registeredAt || registeredAt,
-    paymentSource: "admin_wallet",
-    adminTransactionId: registration.adminTransactionId || adminTransactionId,
+    paymentSource: "simulator_wallet",
+    simulatorTransactionId: registration.simulatorTransactionId || simulatorTransactionId,
     status: "registered"
   }));
 
