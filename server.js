@@ -330,7 +330,10 @@ function parseIncomingPaymentSms(message) {
   const text = String(message || "").trim();
   if (!text || text.length > 5000) return null;
 
-  const idMatches = [...text.matchAll(/\b(?=[A-Z0-9]{8,20}\b)(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{8,20}\b/gi)];
+  const idMatches = [...text.matchAll(/\b(?:[A-Z0-9]{8,24})\b/gi)].filter(match => {
+    const token = match[0];
+    return /[A-Z]/i.test(token) && /\d/.test(token) || /^\d{10,24}$/.test(token);
+  });
   if (!idMatches.length) return null;
   const transactionId = idMatches[idMatches.length - 1][0].toUpperCase();
 
