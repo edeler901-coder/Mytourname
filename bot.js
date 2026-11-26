@@ -24,7 +24,8 @@ function menu() {
     [{ text: "👤 Profile", callback_data: "m:profile" }, { text: "🔁 Transfer Money", callback_data: "m:transfer" }],
     [{ text: "📖 Instructions", callback_data: "m:instructions" }, { text: "🎮 My Matches", callback_data: "m:matches" }],
     [{ text: "🧾 Transaction History", callback_data: "m:history" }, { text: "🏅 Tournament Results", callback_data: "m:results" }],
-    [{ text: "🎁 Bonus & Referrals", callback_data: "m:referrals" }, { text: "🆘 Support", callback_data: "m:support" }]
+    [{ text: "🎁 Bonus & Referrals", callback_data: "m:referrals" }, { text: "🔔 Notifications", callback_data: "m:notifications" }],
+    [{ text: "🆘 Support", callback_data: "m:support" }]
   );
   return { reply_markup: { inline_keyboard: rows } };
 }
@@ -131,6 +132,16 @@ bot.on("callback_query", async q => {
       if (action === "instructions") {
         return bot.sendMessage(chatId, "📖 HOW TO PLAY\n\n1. Open Play Tournament.\n2. Register before registration closes. Entry fee: " + ENTRY_FEE + " Br.\n3. Check My Matches for your group and schedule.\n4. Select an available Bingo board during the 100-second selection window.\n5. The server starts the game and calls numbers automatically.\n6. Press BINGO only when your board has a valid winning pattern.\n\nPrize split: 1st " + PRIZE_SPLIT.first + "%, 2nd " + PRIZE_SPLIT.second + "%, 3rd " + PRIZE_SPLIT.third + "%, house " + PRIZE_SPLIT.house + "%.", back());
       }
+      if (action === "notifications") {
+        const p = (await playerRef(id).once("value")).val() || {};
+        const enabled = p.notificationsEnabled !== false;
+        return bot.sendMessage(chatId, "🔔 MATCH NOTIFICATIONS\n\nStatus: " + (enabled ? "ON" : "OFF") + "\n\nChoose whether to receive match-start and board-selection alerts.", {
+          reply_markup: { inline_keyboard: [
+            [{ text: "Turn ON", callback_data: "n:on" }, { text: "Turn OFF", callback_data: "n:off" }],
+            [{ text: "⬅️ Main Menu", callback_data: "m:home" }]
+          ] }
+        });
+      }
       if (action === "support") {
         const contact = SUPPORT_USERNAME ? "\n\nSupport: @" + SUPPORT_USERNAME.replace(/^@/, "") : "\n\nPlease use the official support channel.";
         return bot.sendMessage(chatId, "🆘 SUPPORT\n\nFor account, payment, or tournament help." + contact, back());
@@ -173,6 +184,11 @@ bot.on("callback_query", async q => {
         }
         return bot.sendMessage(chatId, wins.length ? "🏅 YOUR RECENT WINS\n\n" + wins.join("\n") : "No wins have been recorded for your account yet.", back());
       }
+    }
+
+    if (data === "n:on" || data === "n:off") {
+      await playerRef(id).update({ notificationsEnabled: data === "n:on" });
+      return bot.sendMessage(chatId, "Match notifications are now " + (data === "n:on" ? "ON." : "OFF."), back());
     }
 
     if (data.startsWith("a:") && ADMIN_ID && id === ADMIN_ID) {
@@ -324,6 +340,18 @@ bot.on("message", async msg => {
     await bot.sendMessage(msg.chat.id, "Something went wrong. Please try again or contact support.");
   }
 });
+
+bot.notifyPlayer = async (telegramId, message) => {
+  try {
+    const p = (await playerRef(telegramId).once("value")).val();
+    if (!p || p.notificationsEnabled === false) return false;
+    await bot.sendMessage(String(telegramId), message);
+    return true;
+  } catch (error) {
+    console.error("Player notification failed:", error.message);
+    return false;
+  }
+};
 
 bot.on("polling_error", error => console.error("Telegram polling error:", error.message));
 console.log("Bingo Champions player bot started.");
