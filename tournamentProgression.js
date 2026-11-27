@@ -241,11 +241,13 @@ async function processTournamentProgression(tournamentDate) {
   rounds = bracket.rounds || {};
   const semifinals = rounds.semifinals;
 
-  if (semifinals && (!rounds.final || !Array.isArray(bracket.thirdPlacePlayers))) {
+  // The two semi-final losers play for third place BEFORE the grand final.
+  // The winner receives the single 10% third-place prize; fourth receives none.
+  if (semifinals && !rounds.thirdPlace) {
     const semiEntries = Object.values(semifinals.matches || {});
     const finalists = [];
-    const jointThirdPlacePlayers = [];
-    let latestCompletion = 0;
+    const thirdPlacePlayers = [];
+    let latestSemiCompletion = 0;
 
     for (const entry of semiEntries) {
       const snapshot = await db.ref(
@@ -266,45 +268,101 @@ async function processTournamentProgression(tournamentDate) {
       }
 
       finalists.push(winner);
-      jointThirdPlacePlayers.push(loser);
-      latestCompletion = Math.max(
-        latestCompletion,
+      thirdPlacePlayers.push(loser);
+      latestSemiCompletion = Math.max(
+        latestSemiCompletion,
         Number(match.completedAt || match.winner.claimedAt || 0)
       );
     }
 
-    if (finalists.length !== 2 || jointThirdPlacePlayers.length !== 2) return;
+    if (finalists.length !== 2 || thirdPlacePlayers.length !== 2) return;
 
-    if (!rounds.final) {
-      await saveNextStage(
-        tournamentDate,
-        "final",
-        "GRAND FINAL",
-        finalists,
-        latestCompletion + GAME_SLOT_INTERVAL_MS
-      );
+    await saveNextStage(
+      tournamentDate,
+      "thirdPlace",
+      "THIRD-PLACE MATCH",
+      thirdPlacePlayers,
+      latestSemiCompletion + GAME_SLOT_INTERVAL_MS
+    );
+
+    await tournamentRef.update({
+      "bracket/finalists": finalists,
+      "bracket/thirdPlacePlayers": thirdPlacePlayers,
+      "bracket/thirdPlaceStatus": "scheduled"
+    });
+    console.log("Third-place match scheduled before the grand final for " + tournamentDate + ".");
+    return;
+  }
+
+  // Wait for the third-place match to finish, then schedule the grand final.
+  if (rounds.thirdPlace && !rounds.final) {
+    const thirdPlaceResult = await readCompletedWinners(
+      tournamentDate,
+      Object.values(rounds.thirdPlace.matches || {}),
+      rounds.thirdPlace.byePlayers || []
+    );
+    if (!thirdPlaceResult) return;
+
+    const thirdPlaceWinner = thirdPlaceResult.winners[0];
+    if (!thirdPlaceWinner) return;
+
+    const thirdPlaceEntries = Object.values(rounds.thirdPlace.matches || {});
+    const thirdPlaceMatch = thirdPlaceEntries.length
+      ? (await db.ref(
+          "tournaments/" + tournamentDate + "/matches/" +
+          thirdPlaceEntries[0].matchId
+        ).once("value")).val()
+      : null;
+    if (!thirdPlaceMatch || !thirdPlaceMatch.winner) return;
+
+    const thirdPlaceWinnerId = String(thirdPlaceMatch.winner.telegramId);
+    const thirdPlaceLoser = (thirdPlaceEntries[0].players || []).find(
+      player => String(player.telegramId) !== thirdPlaceWinnerId
+    );
+    const thirdPlaceCompletedAt = Number(
+      thirdPlaceMatch.completedAt || thirdPlaceMatch.winner.claimedAt || Date.now()
+    );
+
+    const finalists = Array.isArray(bracket.finalists) ? bracket.finalists : [];
+    if (finalists.length !== 2) {
+      throw new Error("Grand final cannot be scheduled: finalists are missing.");
     }
 
-    const thirdPlaceUpdates = {};
-    for (const player of jointThirdPlacePlayers) {
-      thirdPlaceUpdates[
-        "playerAssignments/" + String(player.telegramId)
-      ] = {
+    await saveNextStage(
+      tournamentDate,
+      "final",
+      "GRAND FINAL",
+      finalists,
+      thirdPlaceCompletedAt + GAME_SLOT_INTERVAL_MS
+    );
+
+    const placementUpdates = {};
+    placementUpdates["playerAssignments/" + String(thirdPlaceWinner.telegramId)] = {
+      tournamentId: tournamentDate,
+      roundKey: "thirdPlace",
+      roundLabel: "3RD PLACE",
+      placement: 3,
+      status: "completed",
+      completedAt: thirdPlaceCompletedAt
+    };
+    if (thirdPlaceLoser) {
+      placementUpdates["playerAssignments/" + String(thirdPlaceLoser.telegramId)] = {
         tournamentId: tournamentDate,
         roundKey: "thirdPlace",
-        roundLabel: "JOINT 3RD PLACE",
-        placement: 3,
+        roundLabel: "4TH PLACE",
+        placement: 4,
         status: "completed",
-        completedAt: latestCompletion
+        completedAt: thirdPlaceCompletedAt
       };
     }
 
     await tournamentRef.update({
-      "bracket/thirdPlacePlayers": jointThirdPlacePlayers,
-      "bracket/thirdPlaceStatus": "shared",
-      ...thirdPlaceUpdates
+      "bracket/thirdPlaceWinner": thirdPlaceWinner,
+      "bracket/fourthPlacePlayer": thirdPlaceLoser || null,
+      "bracket/thirdPlaceStatus": "completed",
+      ...placementUpdates
     });
-    console.log("Third place shared by two semi-final losers for " + tournamentDate + ".");
+    console.log("Grand final scheduled after the third-place match for " + tournamentDate + ".");
     return;
   }
 
