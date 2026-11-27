@@ -212,6 +212,11 @@ tabContent.style.display = "none";
 document.querySelector(".app").appendChild(tabContent);
 
 function showTab(tab) {
+  if (tab !== "brackets" && bracketCountdownInterval) {
+    clearInterval(bracketCountdownInterval);
+    bracketCountdownInterval = null;
+  }
+
   navButtons.forEach(button => {
     button.classList.toggle(
       "active",
@@ -244,7 +249,55 @@ function showTab(tab) {
   }
 }
 
+let bracketCountdownInterval = null;
+
+function updateGroupCountdowns() {
+  document.querySelectorAll("[data-group-countdown]").forEach(timer => {
+    const status = String(timer.dataset.status || "scheduled").toLowerCase();
+
+    if (status === "completed") {
+      timer.textContent = "COMPLETED";
+      return;
+    }
+
+    if (status === "in_progress" || status === "board_selection") {
+      timer.textContent = status === "board_selection" ? "BOARD SELECTION OPEN" : "LIVE NOW";
+      return;
+    }
+
+    const startAt = Date.parse(timer.dataset.startAt || "");
+    if (!Number.isFinite(startAt)) {
+      timer.textContent = "SCHEDULE PENDING";
+      return;
+    }
+
+    const remaining = Math.max(0, startAt - Date.now());
+    if (remaining === 0) {
+      timer.textContent = "START TIME REACHED";
+      return;
+    }
+
+    const totalSeconds = Math.floor(remaining / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const clock = [hours, minutes, seconds]
+      .map(value => String(value).padStart(2, "0"))
+      .join(":");
+
+    timer.textContent = days > 0
+      ? `STARTS IN ${days}d ${clock}`
+      : `STARTS IN ${clock}`;
+  });
+}
+
 async function showBrackets() {
+  if (bracketCountdownInterval) {
+    clearInterval(bracketCountdownInterval);
+    bracketCountdownInterval = null;
+  }
+
   tabContent.innerHTML = "<h2>TOURNAMENT BRACKETS</h2><p>Loading live bracket...</p>";
 
   function safe(value) {
@@ -265,12 +318,14 @@ async function showBrackets() {
             <strong>GROUP ${safe(group.groupNumber)}</strong>
             <span>${safe(String(group.status || "scheduled").replaceAll("_", " ").toUpperCase())}</span>
             <small>${safe(group.winner ? "Qualifier: " + group.winner : group.playerCount + " players")}</small>
+            <small class="group-countdown" data-group-countdown data-start-at="${safe(group.scheduledAt || "")}" data-status="${safe(group.status || "scheduled")}">Loading countdown...</small>
           </div>
         `).join("")
       : Array.from({ length: 32 }, (_, index) => `
           <div class="bracket-group">
             <strong>GROUP ${index + 1}</strong>
             <span>Awaiting assignment</span>
+            <small class="group-countdown">Schedule pending</small>
           </div>
         `).join("");
 
@@ -311,7 +366,14 @@ async function showBrackets() {
       <h3>KNOCKOUT STAGES</h3>
       ${stageRows}
     `;
+
+    updateGroupCountdowns();
+    bracketCountdownInterval = setInterval(updateGroupCountdowns, 1000);
   } catch (error) {
+    if (bracketCountdownInterval) {
+      clearInterval(bracketCountdownInterval);
+      bracketCountdownInterval = null;
+    }
     console.error("Bracket loading error:", error);
     tabContent.innerHTML = `
       <h2>TOURNAMENT BRACKETS</h2>
