@@ -129,7 +129,7 @@ async function createSimulators() {
   ).length;
 
   console.log("Simulator setup and one-time funding completed.");
-  console.log("Expected simulator accounts:", usernames.length);
+  console.log("Expected simulator accounts:", SIMULATORS.length);
   console.log("Eligible simulator accounts in Firebase:", eligibleCount);
   console.log("New accounts created:", createdCount);
   console.log("Existing zero-balance accounts funded:", fundedCount);
