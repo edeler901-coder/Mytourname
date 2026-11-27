@@ -195,7 +195,7 @@ async function processTournamentProgression(tournamentDate) {
   rounds = bracket.rounds || {};
   const semifinals = rounds.semifinals;
 
-  if (semifinals && !rounds.final) {
+  if (semifinals && (!rounds.final || !Array.isArray(bracket.thirdPlacePlayers))) {
     const semiEntries = Object.values(semifinals.matches || {});
     const finalists = [];
     const jointThirdPlacePlayers = [];
@@ -231,13 +231,15 @@ async function processTournamentProgression(tournamentDate) {
 
     if (finalists.length !== 2 || jointThirdPlacePlayers.length !== 2) return;
 
-    await saveNextStage(
-      tournamentDate,
-      "final",
-      "GRAND FINAL",
-      finalists,
-      latestCompletion + GAME_SLOT_INTERVAL_MS
-    );
+    if (!rounds.final) {
+      await saveNextStage(
+        tournamentDate,
+        "final",
+        "GRAND FINAL",
+        finalists,
+        latestCompletion + GAME_SLOT_INTERVAL_MS
+      );
+    }
 
     const thirdPlaceUpdates = {};
     for (const player of jointThirdPlacePlayers) {
