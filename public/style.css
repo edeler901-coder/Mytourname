@@ -1834,41 +1834,55 @@ body {
 .prizes .prize-details {
   min-width: 0;
   flex: 1;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  column-gap: 10px;
-  row-gap: 3px;
-}
-
-.prizes .prize-place {
-  grid-column: 1;
-  color: #ffffffd9;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: .8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
 }
 
 .prizes .prize-details strong {
-  grid-column: 2;
-  grid-row: 1 / span 2;
+  order: 1;
   color: #ffe08a;
-  font-size: 25px;
+  font-size: 20px;
   line-height: 1;
   font-weight: 900;
   text-shadow: 0 0 16px #ffcb5688;
 }
 
+.prizes .prize-place {
+  order: 2;
+  color: #ffffffd9;
+  font-size: 9px;
+  line-height: 1.1;
+  font-weight: 900;
+  letter-spacing: .8px;
+}
+
 .prizes .prize-amount {
-  grid-column: 1;
+  order: 3;
   color: #ffffff;
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.1;
   font-weight: 900;
   margin: 0;
   text-shadow: 0 0 12px #ffffff55;
 }
 
+.prizes .prize-row {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.prizes .prize-rank {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  border-radius: 9px;
+  font-size: 18px;
+}
+
 @media (max-width: 360px) {
-  .prizes .prize-row { padding: 12px; gap: 10px; }
-  .prizes .prize-details strong { font-size: 23px; }
+  .prizes .prize-row { padding: 7px 12px; gap: 10px; }
+  .prizes .prize-details strong { font-size: 19px; }
 }
