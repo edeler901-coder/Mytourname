@@ -5,108 +5,22 @@ const FUNDING_VERSION = 2;
 const LOW_BALANCE_TOPUP_VERSION = 1;
 const MINIMUM_REGISTRATION_BALANCE = 200;
 
-const usernames = [
-  // 20 Habesha names
-  "Abel",
-  "Dawit",
-  "Nahom",
-  "Henok",
-  "Bereket",
-  "Natnael",
-  "Robel",
-  "Yonatan",
-  "Meron",
-  "Eden",
-  "Selam",
-  "Ruth",
-  "Liya",
-  "Bethlehem",
-  "Hana",
-  "Sami",
-  "Mikias",
-  "Yared",
-  "Mahlet",
-  "Kalkidan",
-
-  // 15 football players
-  "Messi",
-  "Ronaldo",
-  "Neymar",
-  "Mbappe",
-  "Haaland",
-  "Salah",
-  "Modric",
-  "Bellingham",
-  "Vinicius",
-  "Benzema",
-  "Lewandowski",
-  "DeBruyne",
-  "Kane",
-  "Ronaldinho",
-  "Zidane",
-
-  // 15 actors
-  "LeonardoDiCaprio",
-  "DenzelWashington",
-  "TomCruise",
-  "WillSmith",
-  "KeanuReeves",
-  "BradPitt",
-  "JohnnyDepp",
-  "MorganFreeman",
-  "JackieChan",
-  "RobertDowney",
-  "AngelinaJolie",
-  "ScarlettJohansson",
-  "JasonStatham",
-  "ChrisHemsworth",
-  "JimCarrey",
-
-  // 10 leaders
-  "Mandela",
-  "Lincoln",
-  "Churchill",
-  "Gandhi",
-  "Ataturk",
-  "Nkrumah",
-  "Meles",
-  "TeddyRoosevelt",
-  "JFK",
-  "Winston",
-
-  // 15 singers
-  "MichaelJackson",
-  "Beyonce",
-  "Shakira",
-  "Rihanna",
-  "Adele",
-  "Drake",
-  "Eminem",
-  "TheWeeknd",
-  "TaylorSwift",
-  "BrunoMars",
-  "ArianaGrande",
-  "BobMarley",
-  "TeddyAfro",
-  "AsterAweke",
-  "Gigi"
-];
+const { SIMULATORS } = require("./simulatorList");
 
 async function createSimulators() {
-  if (usernames.length !== 75) {
-    throw new Error("The username list must contain exactly 75 names.");
+  if (SIMULATORS.length !== 75) {
+    throw new Error("The master simulator list must contain exactly 75 names.");
   }
 
   const now = Date.now();
   const updates = {};
 
-  usernames.forEach((username, index) => {
-    const id = `SIM${String(index + 1).padStart(3, "0")}`;
+  SIMULATORS.forEach(({ id, username, displayName }) => {
 
     updates[id] = {
       id,
       username,
-      displayName: username,
+      displayName,
       isSimulator: true,
       accountType: "simulator",
       balance: STARTING_BALANCE,
