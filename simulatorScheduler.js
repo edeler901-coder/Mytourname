@@ -67,6 +67,12 @@ async function getOpenTournament(tournamentDate) {
 async function prepareDailyBatch() {
   const registrationDate = getAddisDate();
   const tournamentDate = getTomorrowDate(registrationDate);
+  const batchRef = db.ref("simulatorBatches/" + registrationDate);
+  const existingBatchSnapshot = await batchRef.once("value");
+  const existingBatch = existingBatchSnapshot.val();
+  if (existingBatch && existingBatch.tournamentDate === tournamentDate &&
+      existingBatch.version === 1) return existingBatch;
+
   const tournament = await getOpenTournament(tournamentDate);
   if (!tournament) return null;
 
@@ -121,7 +127,6 @@ async function prepareDailyBatch() {
     };
   }
 
-  const batchRef = db.ref("simulatorBatches/" + registrationDate);
   const transaction = await batchRef.transaction(current => {
     if (current && current.tournamentDate === tournamentDate &&
         current.version === 1) return current;
