@@ -1186,7 +1186,7 @@ body {
 /* SIDE-BY-SIDE WELCOME AND WALLET */
 .welcome-wallet-row {
   display: grid;
-  grid-template-columns: 1.05fr .95fr;
+  grid-template-columns: 1fr;
   gap: 10px;
   align-items: stretch;
   margin-bottom: 22px;
