@@ -1994,3 +1994,31 @@ body {
   }
   .prizes .prize-row .prize-details strong { font-size: 19px; }
 }
+
+
+/* REGISTRATION CLOSING COUNTDOWN — DIRECTLY UNDER THE MIDNIGHT NOTICE */
+.registration-countdown {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: -5px;
+  padding-bottom: 4px;
+  text-align: center;
+}
+.registration-countdown span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+}
+.registration-countdown strong {
+  color: #f3d58a;
+  font-size: 23px;
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px #f3d58a55;
+}
