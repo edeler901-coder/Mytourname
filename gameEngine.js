@@ -129,7 +129,10 @@ async function createMatch(tournamentDate, group) {
     throw new Error("Unable to create match.");
   }
 
-  console.log(`Match initialized: Group ${group.groupNumber}`);
+  console.log(
+    "Match initialized: " +
+    (group.roundLabel || ("Group " + group.groupNumber))
+  );
 
   return result.snapshot.val();
 }
