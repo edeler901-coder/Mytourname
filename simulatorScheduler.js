@@ -757,10 +757,23 @@ async function processDueRegistrations() {
       const playerId = String(claim.task.playerId);
 
       try {
+        console.log(
+          "Attempting simulator registration:",
+          playerId,
+          "for",
+          tournamentDate
+        );
+
         const result = await registerSimulator(
           playerId,
           tournamentDate,
           tournament.entryFee
+        );
+
+        console.log(
+          "Simulator registration result:",
+          playerId,
+          result.status
         );
 
         if (
