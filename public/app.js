@@ -947,3 +947,40 @@ function renderCalledNumbers(drawnNumbers) {
     board.appendChild(cell);
   }
 }
+
+
+// Live registration closing countdown — Addis Ababa time (UTC+3).
+function updateRegistrationCountdown() {
+  const timeElement = document.getElementById("registrationCountdownTime");
+  if (!timeElement) return;
+
+  const now = new Date();
+  const addisParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Addis_Ababa",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+
+  const dateParts = {};
+  addisParts.forEach(part => {
+    if (part.type !== "literal") dateParts[part.type] = Number(part.value);
+  });
+
+  // Ethiopia stays on UTC+3; registration closes at local midnight.
+  const closingTime = Date.UTC(
+    dateParts.year,
+    dateParts.month - 1,
+    dateParts.day + 1
+  ) - (3 * 60 * 60 * 1000);
+
+  const remainingSeconds = Math.max(0, Math.floor((closingTime - now.getTime()) / 1000));
+  const hours = String(Math.floor(remainingSeconds / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor((remainingSeconds % 3600) / 60)).padStart(2, "0");
+  const seconds = String(remainingSeconds % 60).padStart(2, "0");
+
+  timeElement.textContent = `${hours}:${minutes}:${seconds}`;
+}
+
+updateRegistrationCountdown();
+setInterval(updateRegistrationCountdown, 1000);
