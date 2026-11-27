@@ -126,6 +126,107 @@ app.get("/api/tournament/settings", async (req, res) => {
   }
 });
 
+// Public live bracket data for the Mini App.
+app.get("/api/tournament/brackets", async (req, res) => {
+  try {
+    let tournamentDate = getCurrentTournamentDate();
+    let snapshot = await db.ref("tournaments/" + tournamentDate).once("value");
+    let tournament = snapshot.val();
+
+    // Before today's tournament has been assigned, show tomorrow's registration.
+    if (!tournament || !tournament.groups) {
+      const [year, month, day] = tournamentDate.split("-").map(Number);
+      tournamentDate = new Date(Date.UTC(year, month - 1, day + 1))
+        .toISOString().slice(0, 10);
+      snapshot = await db.ref("tournaments/" + tournamentDate).once("value");
+      tournament = snapshot.val();
+    }
+
+    if (!tournament) {
+      return res.json({
+        success: true,
+        tournamentDate,
+        status: "not_created",
+        groups: [],
+        rounds: {}
+      });
+    }
+
+    async function summarize(entry, defaultLabel) {
+      const matchSnapshot = await db.ref(
+        "tournaments/" + tournamentDate + "/matches/" + entry.matchId
+      ).once("value");
+      const match = matchSnapshot.val() || {};
+      const players = (entry.players || []).map(player => ({
+        name: player.displayName || player.username ||
+          (player.isSimulator ? "Simulator" : "Player"),
+        isSimulator: player.isSimulator === true
+      }));
+      const winnerId = match.winner
+        ? String(match.winner.telegramId)
+        : null;
+      const winnerPlayer = winnerId
+        ? (entry.players || []).find(player =>
+            String(player.telegramId) === winnerId)
+        : null;
+
+      return {
+        matchId: entry.matchId,
+        label: entry.roundLabel || defaultLabel,
+        matchNumber: entry.matchNumber || null,
+        scheduledAt: entry.scheduledAt || null,
+        status: match.status || entry.status || "scheduled",
+        players,
+        winner: winnerPlayer
+          ? winnerPlayer.displayName || winnerPlayer.username ||
+            (winnerPlayer.isSimulator ? "Simulator" : "Player")
+          : null
+      };
+    }
+
+    const groups = await Promise.all(
+      Object.values(tournament.groups || {}).map(async group => {
+        const summary = await summarize(group, "GROUP " + group.groupNumber);
+        return {
+          groupNumber: group.groupNumber,
+          status: summary.status,
+          playerCount: summary.players.length,
+          winner: summary.winner,
+          scheduledAt: summary.scheduledAt
+        };
+      })
+    );
+
+    const rounds = {};
+    const savedRounds = tournament.bracket?.rounds || {};
+    for (const [key, stage] of Object.entries(savedRounds)) {
+      rounds[key] = {
+        label: stage.label,
+        status: stage.status || "scheduled",
+        matches: await Promise.all(
+          Object.values(stage.matches || {}).map(entry =>
+            summarize(entry, stage.label)
+          )
+        )
+      };
+    }
+
+    return res.json({
+      success: true,
+      tournamentDate,
+      status: tournament.status || "scheduled",
+      groups,
+      rounds
+    });
+  } catch (error) {
+    console.error("Tournament bracket lookup failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to load tournament brackets."
+    });
+  }
+});
+
 // Player wallet
 app.get("/api/player/balance", requireTelegramAuth, async (req, res) => {
   try {
