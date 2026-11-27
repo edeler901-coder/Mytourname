@@ -100,7 +100,10 @@ async function createMatch(tournamentDate, group) {
     return {
       matchId: group.matchId,
       tournamentDate,
-      groupNumber: group.groupNumber,
+      groupNumber: group.groupNumber || null,
+      roundKey: group.roundKey || null,
+      roundLabel: group.roundLabel || (group.groupNumber ? "GROUP " + group.groupNumber : null),
+      matchNumber: group.matchNumber || null,
       scheduledAt: group.scheduledAt,
       status: "scheduled",
 
@@ -741,6 +744,9 @@ async function getMatchState(tournamentDate, matchId) {
     matchId: match.matchId,
     tournamentDate: match.tournamentDate,
     groupNumber: match.groupNumber,
+    roundKey: match.roundKey || null,
+    roundLabel: match.roundLabel || (match.groupNumber ? "GROUP " + match.groupNumber : null),
+    matchNumber: match.matchNumber || null,
     scheduledAt: match.scheduledAt,
     status: match.status,
 
