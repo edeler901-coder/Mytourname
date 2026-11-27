@@ -776,7 +776,16 @@ async function processDueRegistrations() {
 
       const claim = await claimTask(taskRef, now);
       if (!claim) {
-        console.log("Simulator task was not claimed:", task.playerId);
+        const currentTaskSnapshot = await taskRef.once("value");
+        const currentTask = currentTaskSnapshot.val() || {};
+        console.log("Simulator task was not claimed:", {
+          playerId: task.playerId,
+          status: currentTask.status || "pending",
+          runAt: currentTask.runAt || null,
+          nextAttemptAt: currentTask.nextAttemptAt || null,
+          claimedAt: currentTask.claimedAt || null,
+          currentTime: now
+        });
         continue;
       }
 
