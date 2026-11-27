@@ -38,10 +38,7 @@ async function loadTournament() {
     console.log("Tournament settings:", settings);
 
     updateTournamentStats(settings);
-
-    registerButton.disabled = false;
-    registerButton.textContent =
-      `REGISTER NOW - ${settings.entryFee} BR`;
+    await loadRegistrationStatus(settings.entryFee);
 
   } catch (error) {
     console.error(error);
@@ -49,6 +46,48 @@ async function loadTournament() {
     registerButton.disabled = true;
     registerButton.textContent = "TOURNAMENT UNAVAILABLE";
   }
+}
+
+
+// Restore the player's registration state when the Mini App opens.
+async function loadRegistrationStatus(entryFee) {
+  if (!tg || !tg.initData) {
+    registerButton.disabled = false;
+    registerButton.classList.remove("registered");
+    registerButton.textContent = `REGISTER NOW - ${entryFee} BR`;
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/tournament/status`, {
+      headers: {
+        "X-Telegram-Init-Data": tg.initData
+      }
+    });
+
+    if (!response.ok) throw new Error("Could not check registration status.");
+
+    const status = await response.json();
+
+    if (status.registered) {
+      setRegisteredButton();
+    } else {
+      registerButton.disabled = false;
+      registerButton.classList.remove("registered");
+      registerButton.textContent = `REGISTER NOW - ${entryFee} BR`;
+    }
+  } catch (error) {
+    console.error("Registration status error:", error);
+    registerButton.disabled = false;
+    registerButton.classList.remove("registered");
+    registerButton.textContent = `REGISTER NOW - ${entryFee} BR`;
+  }
+}
+
+function setRegisteredButton() {
+  registerButton.disabled = true;
+  registerButton.classList.add("registered");
+  registerButton.textContent = "REGISTERED ✓";
 }
 
 // Update the public tournament player count and prize pool
@@ -136,7 +175,7 @@ async function registerTournament() {
 
     balanceElement.textContent = result.balance;
 
-    registerButton.textContent = "REGISTERED ✓";
+    setRegisteredButton();
     await loadTournamentStats();
 
     alert("Congratulations! You are registered.");
@@ -147,6 +186,7 @@ async function registerTournament() {
     alert(error.message);
 
     registerButton.disabled = false;
+    registerButton.classList.remove("registered");
     registerButton.textContent = "REGISTER NOW";
   }
 }
