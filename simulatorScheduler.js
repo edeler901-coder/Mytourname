@@ -113,11 +113,6 @@ function makeRandomRegistrationTasks(playerIds, startAt, endAt, previousTasks = 
 
   return tasks.sort((a, b) => Number(a.runAt || 0) - Number(b.runAt || 0));
 }
-tus === "completed") tasks.push(previous);
-  }
-
-  return tasks;
-}
 
 async function getOpenTournament(tournamentDate) {
   const snapshot = await db
