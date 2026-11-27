@@ -2311,3 +2311,9 @@ body {
     font-size: 8px;
   }
 }
+
+
+/* ENLARGE WALLET BALANCE NUMBER BY 1.5X */
+.header .wallet h2 {
+  font-size: 31.5px;
+}
