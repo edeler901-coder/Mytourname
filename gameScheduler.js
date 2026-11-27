@@ -15,6 +15,8 @@ const {
   claimWinner
 } = require("./gameEngine");
 
+const { processTournamentProgression } = require("./tournamentProgression");
+
 const CHECK_INTERVAL_MS = 1000;
 
 let schedulerStarted = false;
@@ -63,9 +65,13 @@ async function processScheduledMatches() {
       return;
     }
 
-    const groups = Object.values(tournament.groups);
+    const preliminaryMatches = Object.values(tournament.groups);
+    const knockoutMatches = Object.values(tournament.bracket?.rounds || {})
+      .flatMap(stage => Object.values(stage.matches || {}));
+    const allMatches = [...preliminaryMatches, ...knockoutMatches];
 
-    for (const group of groups) {
+    for (const group of allMatches) {
+      const matchLabel = group.roundLabel || ("Group " + group.groupNumber);
       if (
         !group ||
         !group.matchId ||
@@ -84,7 +90,7 @@ async function processScheduledMatches() {
           initializedMatches.add(matchKey);
 
           console.log(
-            `Group ${group.groupNumber}: match initialized.`
+            `${matchLabel}: match initialized.`
           );
         }
 
@@ -94,7 +100,7 @@ async function processScheduledMatches() {
 
         if (!Number.isFinite(scheduledTime)) {
           console.error(
-            `Group ${group.groupNumber}: invalid scheduled time.`
+            `${matchLabel}: invalid scheduled time.`
           );
           continue;
         }
@@ -143,7 +149,7 @@ async function processScheduledMatches() {
           if (notice.committed && notice.snapshot.val() === notificationTime) {
             for (const player of (state.players || [])) {
               if (player && player.telegramId && player.isSimulator !== true) {
-                await bot.notifyPlayer(player.telegramId, "🎮 Your Group " + group.groupNumber + " match is open. Choose your Bingo board now. You have 100 seconds.");
+                await bot.notifyPlayer(player.telegramId, "🎮 Your " + matchLabel + " match is open. Choose your Bingo board now. You have 100 seconds.");
               }
             }
           }
@@ -173,7 +179,7 @@ async function processScheduledMatches() {
           if (notice.committed && notice.snapshot.val() === notificationTime) {
             for (const player of (state.players || [])) {
               if (player && player.telegramId && player.isSimulator !== true) {
-                await bot.notifyPlayer(player.telegramId, "🔔 Your Group " + group.groupNumber + " Bingo match has started. Good luck!");
+                await bot.notifyPlayer(player.telegramId, "🔔 Your " + matchLabel + " Bingo match has started. Good luck!");
               }
             }
           }
@@ -203,7 +209,7 @@ async function processScheduledMatches() {
 
         if (result) {
           console.log(
-            `Group ${group.groupNumber}: called ${result.letter}-${result.number}`
+            `${matchLabel}: called ${result.letter}-${result.number}`
           );
 
           // Simulator opponents use the same server-side winning-pattern verification as humans.
@@ -221,7 +227,7 @@ async function processScheduledMatches() {
                   player.telegramId
                 );
                 console.log(
-                  `Simulator ${player.telegramId} claimed Bingo in Group ${group.groupNumber}.`
+                  `Simulator ${player.telegramId} claimed Bingo in ${matchLabel}.`
                 );
                 if (winner) break;
               }
@@ -240,6 +246,10 @@ async function processScheduledMatches() {
         );
       }
     }
+
+    // Create the next knockout stage only after every match in the
+    // current stage has a confirmed winner.
+    await processTournamentProgression(tournamentDate);
 
   } catch (error) {
     console.error("Game scheduler error:", error);
