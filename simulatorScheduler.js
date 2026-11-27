@@ -776,7 +776,7 @@ async function processDueRegistrations() {
 
       const claim = await claimTask(taskRef, now);
       if (!claim) {
-        console.log("Simulator task was not claimed:", playerId);
+        console.log("Simulator task was not claimed:", task.playerId);
         continue;
       }
 
