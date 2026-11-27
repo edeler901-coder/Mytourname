@@ -5,6 +5,7 @@ const API_URL = window.location.origin;
 
 const balanceElement = document.getElementById("balance");
 const playersElement = document.getElementById("players");
+const prizePoolElement = document.getElementById("prizePool");
 const registerButton = document.getElementById("registerBtn");
 
 // Initialize Telegram Mini App
@@ -55,7 +56,13 @@ function updateTournamentStats(settings) {
   if (playersElement) {
     playersElement.textContent =
       Number(settings.registeredPlayers || 0).toLocaleString("en-US");
-  }}
+  }
+
+  if (prizePoolElement) {
+    prizePoolElement.innerHTML =
+      `${Number(settings.prizePool || 0).toLocaleString("en-US")} <small>BR</small>`;
+  }
+}
 
 // Refresh statistics without changing the registration button state
 async function loadTournamentStats() {
