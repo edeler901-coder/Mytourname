@@ -105,7 +105,11 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
       return account;
     });
 
-    const account = charge.snapshot.val();
+    // Read the account directly after the transaction. An aborted Firebase
+    // transaction can return an empty transaction snapshot even when the
+    // simulator record still exists in the database.
+    const accountSnapshot = await accountRef.get();
+    const account = accountSnapshot.val();
     if (!account || account.isSimulator !== true || account.accountType !== "simulator") {
       throw new Error("Simulator account is missing or has invalid account flags.");
     }
