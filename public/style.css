@@ -1514,3 +1514,15 @@ body {
     font-size: 7px;
   }
 }
+
+
+/* Registered tournament button state */
+#registerBtn.registered,
+#registerBtn.registered:disabled {
+  background: linear-gradient(135deg, #168653, #0d6540);
+  border: 1px solid #55d99a;
+  color: #ffffff;
+  opacity: 1;
+  cursor: not-allowed;
+  box-shadow: 0 5px 16px #16a76540;
+}
