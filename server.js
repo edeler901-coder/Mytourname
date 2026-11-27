@@ -228,18 +228,32 @@ async function getPlayerMatch(telegramId) {
     .once("value");
 
   const tournament = snapshot.val() || {};
+  const assignmentSnapshot = await db.ref(
+    "tournaments/" + tournamentDate + "/playerAssignments/" + String(telegramId)
+  ).once("value");
+  const assignment = assignmentSnapshot.val();
+
   const preliminaryMatches = Object.values(tournament.groups || {});
   const knockoutMatches = Object.values(tournament.bracket?.rounds || {})
     .flatMap(stage => Object.values(stage.matches || {}));
+  const allMatches = [...knockoutMatches, ...preliminaryMatches];
 
-  const group = [...preliminaryMatches, ...knockoutMatches].find(item =>
-    item &&
-    item.matchId &&
-    Array.isArray(item.players) &&
-    item.players.some(
-      player => String(player.telegramId) === String(telegramId)
-    )
-  );
+  // The assignment record is updated at every advancement, so prefer its
+  // matchId rather than accidentally returning an earlier completed match.
+  let group = assignment
+    ? allMatches.find(item => item && item.matchId === assignment.matchId)
+    : null;
+
+  if (!group) {
+    group = allMatches.find(item =>
+      item &&
+      item.matchId &&
+      Array.isArray(item.players) &&
+      item.players.some(
+        player => String(player.telegramId) === String(telegramId)
+      )
+    );
+  }
 
   if (!group) {
     throw new Error("Your match assignment was not found.");
