@@ -293,92 +293,121 @@ function updateGroupCountdowns() {
 }
 
 async function showBrackets() {
-  if (bracketCountdownInterval) {
-    clearInterval(bracketCountdownInterval);
-    bracketCountdownInterval = null;
-  }
-
+  if (bracketCountdownInterval) clearInterval(bracketCountdownInterval);
   tabContent.innerHTML = "<h2>TOURNAMENT BRACKETS</h2><p>Loading live bracket...</p>";
 
   function safe(value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;",
-      "\"": "&quot;", "'": "&#39;"
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
     })[char]);
   }
 
   try {
-    const response = await fetch(`${API_URL}/api/tournament/brackets`);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Bracket unavailable.");
+    const headers = tg && tg.initData ? { "X-Telegram-Init-Data": tg.initData } : {};
+    const [bracketResponse, assignmentResponse] = await Promise.all([
+      fetch(`${API_URL}/api/tournament/brackets`),
+      tg && tg.initData ? fetch(`${API_URL}/api/player/assignment`, { headers }) : Promise.resolve(null)
+    ]);
+    const data = await bracketResponse.json();
+    if (!bracketResponse.ok) throw new Error(data.error || "Bracket unavailable.");
+
+    let myMatchId = null;
+    let myMatchStatus = "scheduled";
+    if (assignmentResponse) {
+      const assignmentData = await assignmentResponse.json();
+      if (assignmentResponse.ok && assignmentData.assigned) {
+        myMatchId = assignmentData.assignment.matchId || null;
+        myMatchStatus = assignmentData.matchStatus || "scheduled";
+      }
+    }
 
     const groupRows = data.groups && data.groups.length
-      ? data.groups.map(group => `
-          <div class="bracket-group">
-            <strong>GROUP ${safe(group.groupNumber)}</strong>
-            <span>${safe(String(group.status || "scheduled").replaceAll("_", " ").toUpperCase())}</span>
-            <small>${safe(group.winner ? "Qualifier: " + group.winner : group.playerCount + " players")}</small>
-            <small class="group-countdown" data-group-countdown data-start-at="${safe(group.scheduledAt || "")}" data-status="${safe(group.status || "scheduled")}">Loading countdown...</small>
-          </div>
-        `).join("")
-      : Array.from({ length: 32 }, (_, index) => `
-          <div class="bracket-group">
-            <strong>GROUP ${index + 1}</strong>
-            <span>Awaiting assignment</span>
-            <small class="group-countdown">Schedule pending</small>
-          </div>
+      ? data.groups.map(group => {
+          const isMyGroup = Boolean(myMatchId && group.matchId === myMatchId);
+          const players = (group.players || []).map(player =>
+            `<div class="group-player">${safe(player.name)}</div>`
+          ).join("");
+          const status = String(group.status || "scheduled").toLowerCase();
+          const canPlay = isMyGroup && ["board_selection", "in_progress"].includes(myMatchStatus);
+          const buttonLabel = myMatchStatus === "board_selection" ? "PLAY — SELECT BOARD" : "PLAY MATCH";
+          return `
+            <article class="bracket-group group-card" data-group-card>
+              <button type="button" class="group-card-toggle" aria-expanded="false">
+                <span class="group-card-top">
+                  <strong>GROUP ${safe(group.groupNumber)}</strong>
+                  <span class="group-card-time">
+                    ${safe(group.scheduledAt ? new Date(group.scheduledAt).toLocaleTimeString("en-US", {timeZone:"Africa/Addis_Ababa",hour:"2-digit",minute:"2-digit"}) : "Time pending")}
+                    <b class="group-countdown" data-group-countdown data-start-at="${safe(group.scheduledAt || "")}" data-status="${safe(status)}">Loading...</b>
+                  </span>
+                </span>
+                <span class="group-card-meta">
+                  <span class="group-status">${safe(status.replaceAll("_"," ").toUpperCase())}</span>
+                  <span class="group-player-count">${safe(group.playerCount)} PLAYERS</span>
+                  <span class="group-chevron">⌄</span>
+                </span>
+              </button>
+              <div class="group-card-details" hidden>
+                <div class="group-player-list">${players || "<span>Players will appear after assignments.</span>"}</div>
+                ${isMyGroup ? `<button type="button" class="group-play-button" ${canPlay ? "" : "disabled"}>${canPlay ? buttonLabel : "WAIT FOR MATCH TIME"}</button>` : ""}
+                ${isMyGroup && !canPlay ? '<p class="group-wait-note">Your PLAY button activates when the 100-second board-selection window opens.</p>' : ""}
+              </div>
+            </article>
+          `;
+        }).join("")
+      : Array.from({length:32},(_,index)=>`
+          <article class="bracket-group group-card">
+            <button type="button" class="group-card-toggle" aria-expanded="false">
+              <span class="group-card-top"><strong>GROUP ${index+1}</strong><span>Schedule pending</span></span>
+              <span class="group-card-meta"><span class="group-status">AWAITING ASSIGNMENT</span><span class="group-chevron">⌄</span></span>
+            </button>
+            <div class="group-card-details" hidden><p>Players will appear after assignments.</p></div>
+          </article>
         `).join("");
 
     const stageDefinitions = [
-      ["round32", "ROUND OF 32 — 16 MATCHES"],
-      ["round16", "ROUND OF 16 — 8 MATCHES"],
-      ["quarterfinals", "QUARTER-FINALS — 4 MATCHES"],
-      ["semifinals", "SEMI-FINALS — 2 MATCHES"],
-      ["final", "GRAND FINAL"],
-      ["thirdPlace", "THIRD-PLACE MATCH"]
+      ["round32","ROUND OF 32 — 16 MATCHES"],
+      ["round16","ROUND OF 16 — 8 MATCHES"],
+      ["quarterfinals","QUARTER-FINALS — 4 MATCHES"],
+      ["semifinals","SEMI-FINALS — 2 MATCHES"],
+      ["final","GRAND FINAL"]
     ];
-
-    const stageRows = stageDefinitions.map(([key, title]) => {
+    const stageRows = stageDefinitions.map(([key,title]) => {
       const stage = data.rounds && data.rounds[key];
-      if (!stage) {
-        return `<div class="bracket-round">${title} · Awaiting qualification</div>`;
-      }
-
+      if (!stage) return `<div class="bracket-round">${title} · Awaiting qualification</div>`;
       const matches = (stage.matches || []).map(match => {
-        const players = (match.players || []).map(player => safe(player.name)).join(" vs ");
-        const status = safe(String(match.status || "scheduled").replaceAll("_", " ").toUpperCase());
-        const result = match.winner ? " · Winner: " + safe(match.winner) : "";
-        return `<div class="bracket-group">
-          <strong>MATCH ${safe(match.matchNumber || "")}</strong>
-          <span>${players || "Players pending"}</span>
-          <small>${status}${result}</small>
-        </div>`;
+        const players = (match.players || []).map(player=>safe(player.name)).join(" vs ");
+        const status = safe(String(match.status||"scheduled").replaceAll("_"," ").toUpperCase());
+        const result = match.winner ? " · Winner: "+safe(match.winner) : "";
+        return `<div class="bracket-group"><strong>MATCH ${safe(match.matchNumber||"")}</strong><span>${players||"Players pending"}</span><small>${status}${result}</small></div>`;
       }).join("");
-
-      return `<h3>${title}</h3><div class="bracket-grid">${matches || "<p>Matches pending</p>"}</div>`;
+      return `<h3>${title}</h3><div class="bracket-grid">${matches||"<p>Matches pending</p>"}</div>`;
     }).join("");
 
     tabContent.innerHTML = `
       <h2>TOURNAMENT BRACKETS</h2>
       <p>${safe(data.tournamentDate)} · 32 groups · 32 qualifying places</p>
-      <h3>PRELIMINARY ROUND</h3>
-      <div class="bracket-grid">${groupRows}</div>
-      <h3>KNOCKOUT STAGES</h3>
-      ${stageRows}
+      <h3>PRELIMINARY ROUND</h3><div class="bracket-grid">${groupRows}</div>
+      <h3>KNOCKOUT STAGES</h3>${stageRows}
     `;
 
+    document.querySelectorAll("[data-group-card]").forEach(card => {
+      const toggle = card.querySelector(".group-card-toggle");
+      const details = card.querySelector(".group-card-details");
+      toggle.addEventListener("click", () => {
+        const expanded = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", String(!expanded));
+        details.hidden = expanded;
+        card.classList.toggle("expanded", !expanded);
+      });
+      const play = card.querySelector(".group-play-button");
+      if (play && !play.disabled) play.addEventListener("click", openGameRoom);
+    });
+
     updateGroupCountdowns();
-    bracketCountdownInterval = setInterval(updateGroupCountdowns, 1000);
-  } catch (error) {
-    if (bracketCountdownInterval) {
-      clearInterval(bracketCountdownInterval);
-      bracketCountdownInterval = null;
-    }
-    console.error("Bracket loading error:", error);
-    tabContent.innerHTML = `
-      <h2>TOURNAMENT BRACKETS</h2>
-      <p>${safe(error.message)}</p>
-    `;
+    bracketCountdownInterval = setInterval(updateGroupCountdowns,1000);
+  } catch(error) {
+    console.error("Bracket loading error:",error);
+    tabContent.innerHTML = `<h2>TOURNAMENT BRACKETS</h2><p>${safe(error.message)}</p>`;
   }
 }
 
