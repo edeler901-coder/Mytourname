@@ -157,7 +157,10 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
 
   const token = crypto.randomUUID();
   const result = await accountRef.transaction(player => {
-    if (!player) return;
+    // RTDB may initially supply null when the existing player value is not cached.
+    // Returning null allows the transaction to retry against the server value;
+    // returning undefined would abort the registration immediately.
+    if (!player) return null;
     const balance = Number(player.balance);
     if (!Number.isFinite(balance)) return;
     player.tournamentRegistrations = player.tournamentRegistrations || {};
