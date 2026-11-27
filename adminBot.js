@@ -106,8 +106,8 @@ if (!TOKEN || !ADMIN_ID) {
           player.transactions = player.transactions || {};
           if (player.transactions[creditId]) return player;
 
-          const balance = Number(player.balance);
-          if (!Number.isFinite(balance)) return;
+          const balance = Number(player.balance || 0);
+          if (!Number.isFinite(balance) || balance < 0) return;
           player.balance = Math.round((balance + session.amount) * 100) / 100;
           player.transactions[creditId] = {
             type: "admin_credit",
