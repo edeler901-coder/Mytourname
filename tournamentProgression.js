@@ -1,12 +1,8 @@
 const crypto = require("crypto");
 const { db } = require("./firebase");
 
-const ROUND_DEFINITIONS = [
-  { key: "round32", label: "ROUND OF 32", expectedPlayers: 32 },
-  { key: "round16", label: "ROUND OF 16", expectedPlayers: 16 },
-  { key: "quarterfinals", label: "QUARTER-FINALS", expectedPlayers: 8 },
-  { key: "semifinals", label: "SEMI-FINALS", expectedPlayers: 4 }
-];
+const GAME_SLOT_INTERVAL_MS = 10 * 60 * 1000;
+const GAMES_PER_SLOT = 2;
 
 function shuffle(items) {
   const result = [...items];
@@ -50,7 +46,7 @@ async function readCompletedWinners(tournamentDate, matchEntries) {
   return { winners, latestCompletion };
 }
 
-async function saveNextStage(tournamentDate, roundKey, roundLabel, players, scheduledAt) {
+async function saveNextStage(tournamentDate, roundKey, roundLabel, players, firstGameAt) {
   if (!Array.isArray(players) || players.length < 2 || players.length % 2 !== 0) {
     throw new Error("Invalid qualifier count for " + roundLabel + ".");
   }
@@ -63,11 +59,15 @@ async function saveNextStage(tournamentDate, roundKey, roundLabel, players, sche
   for (let i = 0; i < shuffled.length; i += 2) {
     const matchId = crypto.randomUUID();
     const matchNumber = i / 2 + 1;
+    const slotNumber = Math.floor((matchNumber - 1) / GAMES_PER_SLOT);
+    const scheduledAt = firstGameAt + slotNumber * GAME_SLOT_INTERVAL_MS;
+
     matches[matchId] = {
       matchId,
       roundKey,
       roundLabel,
       matchNumber,
+      slotNumber: slotNumber + 1,
       players: [shuffled[i], shuffled[i + 1]],
       scheduledAt: new Date(scheduledAt).toISOString(),
       status: "scheduled"
@@ -81,7 +81,7 @@ async function saveNextStage(tournamentDate, roundKey, roundLabel, players, sche
       label: roundLabel,
       status: "scheduled",
       createdAt: Date.now(),
-      scheduledAt,
+      scheduledAt: new Date(firstGameAt).toISOString(),
       matches
     };
   });
@@ -91,7 +91,6 @@ async function saveNextStage(tournamentDate, roundKey, roundLabel, players, sche
     throw new Error("Unable to save " + roundLabel + ".");
   }
 
-  // Keep the player's current assignment pointed at their next match.
   const assignmentUpdates = {};
   for (const match of Object.values(stage.matches)) {
     for (const player of match.players || []) {
@@ -115,7 +114,8 @@ async function saveNextStage(tournamentDate, roundKey, roundLabel, players, sche
 
   console.log(
     roundLabel + " created for " + tournamentDate + ": " +
-    Object.keys(stage.matches).length + " matches."
+    Object.keys(stage.matches).length + " matches, " +
+    GAMES_PER_SLOT + " games per 10-minute slot."
   );
 
   return stage;
@@ -125,9 +125,7 @@ async function stageIsComplete(tournamentDate, stage) {
   if (!stage || !stage.matches) return false;
   const entries = Object.values(stage.matches);
   if (!entries.length) return false;
-
-  const result = await readCompletedWinners(tournamentDate, entries);
-  return Boolean(result);
+  return Boolean(await readCompletedWinners(tournamentDate, entries));
 }
 
 async function processTournamentProgression(tournamentDate) {
@@ -143,15 +141,12 @@ async function processTournamentProgression(tournamentDate) {
   let bracket = tournament.bracket || {};
   let rounds = bracket.rounds || {};
 
-  // The 32 preliminary group winners create the Round of 32.
+  // 32 preliminary group winners qualify for the Round of 32.
   if (!rounds.round32) {
     const groups = Object.values(tournament.groups);
     if (groups.length !== 32) return;
 
-    const groupResults = await readCompletedWinners(
-      tournamentDate,
-      groups
-    );
+    const groupResults = await readCompletedWinners(tournamentDate, groups);
     if (!groupResults || groupResults.winners.length !== 32) return;
 
     await saveNextStage(
@@ -159,9 +154,8 @@ async function processTournamentProgression(tournamentDate) {
       "round32",
       "ROUND OF 32",
       groupResults.winners,
-      groupResults.latestCompletion + 60000
+      groupResults.latestCompletion + GAME_SLOT_INTERVAL_MS
     );
-
     return;
   }
 
@@ -190,20 +184,21 @@ async function processTournamentProgression(tournamentDate) {
       step.next,
       step.label,
       result.winners,
-      result.latestCompletion + 60000
+      result.latestCompletion + GAME_SLOT_INTERVAL_MS
     );
     return;
   }
 
-  // After both semi-finals, create the final and third-place match.
+  // Semi-final winners advance to one Grand Final.
+  // Both semi-final losers share third place equally; no extra match is played.
   bracket = (await tournamentRef.child("bracket").once("value")).val() || {};
   rounds = bracket.rounds || {};
   const semifinals = rounds.semifinals;
 
-  if (semifinals && (!rounds.final || !rounds.thirdPlace)) {
+  if (semifinals && !rounds.final) {
     const semiEntries = Object.values(semifinals.matches || {});
-    const winners = [];
-    const losers = [];
+    const finalists = [];
+    const jointThirdPlacePlayers = [];
     let latestCompletion = 0;
 
     for (const entry of semiEntries) {
@@ -226,49 +221,63 @@ async function processTournamentProgression(tournamentDate) {
         throw new Error("Semi-final result has invalid participants.");
       }
 
-      winners.push(winner);
-      losers.push(loser);
+      finalists.push(winner);
+      jointThirdPlacePlayers.push(loser);
       latestCompletion = Math.max(
         latestCompletion,
         Number(match.completedAt || match.winner.claimedAt || 0)
       );
     }
 
-    if (winners.length !== 2 || losers.length !== 2) return;
+    if (finalists.length !== 2 || jointThirdPlacePlayers.length !== 2) return;
 
-    if (!rounds.final) {
-      await saveNextStage(
-        tournamentDate, "final", "GRAND FINAL", winners,
-        latestCompletion + 60000
-      );
+    await saveNextStage(
+      tournamentDate,
+      "final",
+      "GRAND FINAL",
+      finalists,
+      latestCompletion + GAME_SLOT_INTERVAL_MS
+    );
+
+    const thirdPlaceUpdates = {};
+    for (const player of jointThirdPlacePlayers) {
+      thirdPlaceUpdates[
+        "playerAssignments/" + String(player.telegramId)
+      ] = {
+        tournamentId: tournamentDate,
+        roundKey: "thirdPlace",
+        roundLabel: "JOINT 3RD PLACE",
+        placement: 3,
+        status: "completed",
+        completedAt: latestCompletion
+      };
     }
-    if (!rounds.thirdPlace) {
-      await saveNextStage(
-        tournamentDate, "thirdPlace", "THIRD-PLACE MATCH", losers,
-        latestCompletion + 60000
-      );
-    }
+
+    await tournamentRef.update({
+      "bracket/thirdPlacePlayers": jointThirdPlacePlayers,
+      "bracket/thirdPlaceStatus": "shared",
+      ...thirdPlaceUpdates
+    });
+
+    console.log(
+      "Third place shared by two semi-final losers for " + tournamentDate + "."
+    );
     return;
   }
 
-  // Finish the tournament only after the final and third-place match end.
+  // The tournament ends when the single Grand Final is completed.
   bracket = (await tournamentRef.child("bracket").once("value")).val() || {};
   rounds = bracket.rounds || {};
-  if (rounds.final && rounds.thirdPlace) {
-    const finalComplete = await stageIsComplete(tournamentDate, rounds.final);
-    const thirdComplete = await stageIsComplete(tournamentDate, rounds.thirdPlace);
-
-    if (finalComplete && thirdComplete) {
-      await tournamentRef.transaction(current => {
-        if (!current || current.status === "completed") return current;
-        current.status = "completed";
-        current.completedAt = Date.now();
-        current.bracket = current.bracket || {};
-        current.bracket.status = "completed";
-        return current;
-      });
-      console.log("Tournament progression completed:", tournamentDate);
-    }
+  if (rounds.final && await stageIsComplete(tournamentDate, rounds.final)) {
+    await tournamentRef.transaction(current => {
+      if (!current || current.status === "completed") return current;
+      current.status = "completed";
+      current.completedAt = Date.now();
+      current.bracket = current.bracket || {};
+      current.bracket.status = "completed";
+      return current;
+    });
+    console.log("Tournament progression completed:", tournamentDate);
   }
 }
 
