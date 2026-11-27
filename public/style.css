@@ -1526,3 +1526,18 @@ body {
   cursor: not-allowed;
   box-shadow: 0 5px 16px #16a76540;
 }
+
+/* LIVE COUNTDOWN ON EACH PRELIMINARY GROUP CARD */
+.bracket-group .group-countdown {
+  display: block;
+  margin-top: 9px;
+  padding: 9px 10px;
+  border: 1px solid #8b6bc0;
+  border-radius: 9px;
+  background: #302044;
+  color: #f5ca70;
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .4px;
+}
