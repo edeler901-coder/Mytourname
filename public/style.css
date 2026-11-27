@@ -1105,7 +1105,32 @@ body {
   box-shadow: 0 8px 24px #168bff30, inset 0 1px 0 #ffffff22;
 }
 
+.live-stat-collected {
+  background:
+    radial-gradient(circle at 100% 0%, #75e6bd55, transparent 48%),
+    linear-gradient(145deg, #155c50, #17483f 62%, #203b50);
+  border: 1px solid #72e4c099;
+  box-shadow: 0 8px 24px #20b98b30, inset 0 1px 0 #ffffff22;
+}
+
+.live-stat-collected > strong {
+  color: #8df0cb;
+  font-size: clamp(23px, 6.5vw, 32px);
+  line-height: 1.05;
+  font-weight: 900;
+  margin-top: 7px;
+  text-shadow: 0 0 18px #4de0b388;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.live-stat-collected > strong small {
+  font-size: 12px;
+  color: #d1ffed;
+}
+
 .live-stat-pool {
+  grid-column: 1 / -1;
   background:
     radial-gradient(circle at 100% 0%, #fff0a855, transparent 48%),
     linear-gradient(145deg, #76501b, #513018 62%, #3b2053);
