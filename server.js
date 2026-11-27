@@ -224,12 +224,15 @@ async function getPlayerMatch(telegramId) {
   const tournamentDate = getCurrentTournamentDate();
 
   const snapshot = await db
-    .ref(`tournaments/${tournamentDate}/groups`)
+    .ref(`tournaments/${tournamentDate}`)
     .once("value");
 
-  const groups = snapshot.val() || {};
+  const tournament = snapshot.val() || {};
+  const preliminaryMatches = Object.values(tournament.groups || {});
+  const knockoutMatches = Object.values(tournament.bracket?.rounds || {})
+    .flatMap(stage => Object.values(stage.matches || {}));
 
-  const group = Object.values(groups).find(item =>
+  const group = [...preliminaryMatches, ...knockoutMatches].find(item =>
     item &&
     item.matchId &&
     Array.isArray(item.players) &&
@@ -288,6 +291,9 @@ app.get("/api/player/match", requireTelegramAuth, async (req, res) => {
       match: {
         matchId: state.matchId,
         groupNumber: state.groupNumber,
+        roundKey: state.roundKey,
+        roundLabel: state.roundLabel,
+        matchNumber: state.matchNumber,
         scheduledAt: state.scheduledAt,
         status: state.status,
         selectionStartedAt: state.selectionStartedAt,
