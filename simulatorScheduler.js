@@ -5,7 +5,7 @@ const TIME_ZONE = "Africa/Addis_Ababa";
 const ENTRY_FEE = 200;
 const CHECK_INTERVAL = 5 * 60 * 1000;
 const PROCESSING_LEASE = 10 * 60 * 1000;
-const SCHEDULE_VERSION = 2;
+const SCHEDULE_VERSION = 3;
 
 let schedulerStarted = false;
 let schedulerTimer = null;
@@ -59,39 +59,57 @@ function isSimulatorAccount(account) {
   );
 }
 
-function makeEvenlySpacedTasks(playerIds, startAt, endAt, previousTasks = []) {
+function makeHourlyBatchTasks(playerIds, startAt, endAt, previousTasks = []) {
   const previousById = new Map();
 
   for (const task of previousTasks || []) {
     if (task && task.playerId) previousById.set(String(task.playerId), task);
   }
 
-  const orderedIds = shuffle(playerIds);
-  const duration = Math.max(0, endAt - startAt);
+  const remainingIds = shuffle(
+    playerIds.filter(id => {
+      const previous = previousById.get(String(id));
+      return !previous || previous.status !== "completed";
+    })
+  );
+
   const tasks = [];
+  let cursor = 0;
+  let batchTime = startAt;
 
-  orderedIds.forEach((playerId, index) => {
-    const previous = previousById.get(String(playerId));
-    const runAt = startAt + Math.floor(
-      (index * duration) / Math.max(orderedIds.length, 1)
-    );
+  while (cursor < remainingIds.length && batchTime < endAt) {
+    const batchSize = crypto.randomInt(11, 17);
+    const batch = remainingIds.slice(cursor, cursor + batchSize);
 
-    if (previous && previous.status === "completed") {
-      tasks.push(previous);
-      return;
+    for (const playerId of batch) {
+      const previous = previousById.get(String(playerId));
+
+      if (previous && previous.status === "processing") {
+        tasks.push(previous);
+        continue;
+      }
+
+      tasks.push({
+        playerId: String(playerId),
+        runAt: batchTime,
+        status: "pending",
+        attempts: Number(previous && previous.attempts) || 0,
+        nextAttemptAt: batchTime,
+        lastError: previous && previous.lastError
+          ? previous.lastError
+          : null
+      });
     }
 
-    tasks.push({
-      playerId: String(playerId),
-      runAt,
-      status: "pending",
-      attempts: Number(previous && previous.attempts) || 0,
-      nextAttemptAt: runAt,
-      lastError: previous && previous.lastError
-        ? previous.lastError
-        : null
-    });
-  });
+    cursor += batch.length;
+    batchTime += 60 * 60 * 1000;
+  }
+
+  // Keep already completed registrations in the schedule/report.
+  for (const playerId of playerIds) {
+    const previous = previousById.get(String(playerId));
+    if (previous && previous.status === "completed") tasks.push(previous);
+  }
 
   return tasks;
 }
@@ -165,17 +183,20 @@ async function prepareDailySchedule() {
 
       if (missingIds.length === 0) return current;
 
+      const previousTasks = current.tasks || [];
       const remainingStart = Math.max(now, getAddisDayStart(registrationDate));
-      const additions = makeEvenlySpacedTasks(
-        missingIds,
+      const tasks = makeHourlyBatchTasks(
+        simulatorIds,
         remainingStart,
-        dayEnd
+        dayEnd,
+        previousTasks
       );
 
       return {
         ...current,
-        tasks: [...(current.tasks || []), ...additions],
-        totalSimulators: existingIds.size + missingIds.length,
+        version: SCHEDULE_VERSION,
+        tasks,
+        totalSimulators: simulatorIds.length,
         updatedAt: now
       };
     }
@@ -185,7 +206,7 @@ async function prepareDailySchedule() {
       : [];
 
     const startAt = Math.max(now, getAddisDayStart(registrationDate));
-    const tasks = makeEvenlySpacedTasks(
+    const tasks = makeHourlyBatchTasks(
       simulatorIds,
       startAt,
       dayEnd,
