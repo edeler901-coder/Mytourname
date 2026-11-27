@@ -225,6 +225,8 @@ const homeSections = document.querySelectorAll(
   ".welcome-wallet-row, .tournament-card, .stats"
 );
 
+const sharedHeader = document.querySelector(".header");
+
 const navButtons = document.querySelectorAll(".bottom-nav button");
 
 const tabContent = document.createElement("section");
@@ -249,6 +251,11 @@ function showTab(tab) {
   homeSections.forEach(section => {
     section.style.display = tab === "home" ? "" : "none";
   });
+
+  if (sharedHeader) {
+    sharedHeader.style.display =
+      tab === "home" || tab === "info" ? "" : "none";
+  }
 
   tabContent.style.display = tab === "home" ? "none" : "block";
 
