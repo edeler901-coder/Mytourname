@@ -2154,3 +2154,160 @@ body {
     font-size: 7px;
   }
 }
+
+
+/* UNIFIED HEADER CARD */
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  margin: 0 0 18px;
+  border: 1px solid #8e6acb88;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 5% 0%, #a77bdf35, transparent 42%),
+    linear-gradient(145deg, #30204d, #211633 72%, #1b142b);
+  box-shadow: 0 10px 28px #00000035, inset 0 1px 0 #ffffff18;
+}
+
+.header-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.header .logo {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  font-size: 25px;
+  background: linear-gradient(145deg, #f8dc91, #bd873b);
+  box-shadow: 0 4px 15px #e7b95a35;
+}
+
+.header-brand {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.header h1 {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.02;
+  letter-spacing: 1px;
+  font-weight: 900;
+}
+
+.header h1 .brand-bingo {
+  color: #f3d58a;
+}
+
+.header h1 .brand-champions {
+  color: #ffffff;
+}
+
+.header-brand p {
+  margin: 5px 0 0;
+  color: #cbb9e4;
+  font-size: 8px;
+  line-height: 1.2;
+  letter-spacing: 1px;
+}
+
+.header .live {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 7px 10px;
+  border: 1px solid #ff777766;
+  border-radius: 20px;
+  background: #ff45451a;
+  color: #ff9292;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .8px;
+  white-space: nowrap;
+}
+
+.header .wallet {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid #ffffff20;
+  border-radius: 13px;
+  background: #ffffff0b;
+  box-shadow: inset 0 1px 0 #ffffff0c;
+}
+
+.header .wallet p {
+  margin: 0;
+  color: #cbb9e4;
+  font-size: 8px;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.header .wallet h2 {
+  margin: 4px 0 0;
+  color: #f3d58a;
+  font-size: 21px;
+  line-height: 1.1;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.header .wallet small {
+  color: #ffffffc9;
+  font-size: 11px;
+}
+
+.header .wallet-icon {
+  font-size: 24px;
+}
+
+@media (max-width: 360px) {
+  .header {
+    gap: 10px;
+    padding: 12px;
+    border-radius: 17px;
+  }
+
+  .header-top {
+    gap: 9px;
+  }
+
+  .header .logo {
+    flex-basis: 42px;
+    width: 42px;
+    height: 42px;
+    font-size: 22px;
+  }
+
+  .header h1 {
+    font-size: 15px;
+  }
+
+  .header-brand p {
+    font-size: 7px;
+    letter-spacing: .6px;
+  }
+
+  .header .live {
+    padding: 6px 8px;
+    font-size: 8px;
+  }
+}
