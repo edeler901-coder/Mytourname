@@ -1,7 +1,7 @@
-
 const { db } = require("./firebase");
 
 const STARTING_BALANCE = 10000;
+const FUNDING_VERSION = 1;
 
 const usernames = [
   // 20 Habesha names
@@ -108,7 +108,8 @@ async function createSimulators() {
       isSimulator: true,
       accountType: "simulator",
       balance: STARTING_BALANCE,
-      fundingVersion: 1,
+      fundingVersion: FUNDING_VERSION,
+      fundedAt: now,
       createdAt: now,
       gamesPlayed: 0,
       gamesWon: 0
@@ -116,24 +117,96 @@ async function createSimulators() {
   });
 
   const ref = db.ref("simulators");
+  let createdCount = 0;
+  let fundedCount = 0;
+  let preservedBalanceCount = 0;
+  let skippedCount = 0;
 
-  const result = await ref.transaction((existing) => {
+  const result = await ref.transaction(existing => {
     existing = existing || {};
 
-    for (const [id, account] of Object.entries(updates)) {
-      if (!existing[id]) {
-        existing[id] = account;
+    // Reset counters because Firebase may retry a transaction callback.
+    createdCount = 0;
+    fundedCount = 0;
+    preservedBalanceCount = 0;
+    skippedCount = 0;
+
+    for (const [id, newAccount] of Object.entries(updates)) {
+      const current = existing[id];
+
+      if (!current) {
+        existing[id] = newAccount;
+        createdCount++;
+        continue;
       }
+
+      // Never modify an account unless it is already marked as a simulator.
+      if (
+        current.isSimulator !== true ||
+        current.accountType !== "simulator"
+      ) {
+        skippedCount++;
+        continue;
+      }
+
+      // A completed funding version is never funded a second time.
+      if (Number(current.fundingVersion) >= FUNDING_VERSION) {
+        continue;
+      }
+
+      const currentBalance =
+        current.balance === undefined || current.balance === null
+          ? 0
+          : Number(current.balance);
+
+      if (!Number.isFinite(currentBalance) || currentBalance < 0) {
+        skippedCount++;
+        continue;
+      }
+
+      // Give the initial balance only to an unfunded zero-balance account.
+      // Preserve any positive balance already in the simulator wallet.
+      if (currentBalance === 0) {
+        current.balance = STARTING_BALANCE;
+        fundedCount++;
+      } else {
+        preservedBalanceCount++;
+      }
+
+      current.fundingVersion = FUNDING_VERSION;
+      current.fundedAt = now;
+      existing[id] = current;
     }
 
     return existing;
   });
 
-  console.log("Simulator setup completed.");
-  console.log("Total usernames:", usernames.length);
-  console.log("Firebase accounts:", Object.keys(result.snapshot.val()).length);
+  if (!result.committed) {
+    throw new Error("Firebase did not commit the simulator funding transaction.");
+  }
 
-  return true;
+  const finalAccounts = result.snapshot.val() || {};
+  const eligibleCount = Object.values(finalAccounts).filter(account =>
+    account &&
+    account.isSimulator === true &&
+    account.accountType === "simulator"
+  ).length;
+
+  console.log("Simulator setup and one-time funding completed.");
+  console.log("Expected simulator accounts:", usernames.length);
+  console.log("Eligible simulator accounts in Firebase:", eligibleCount);
+  console.log("New accounts created:", createdCount);
+  console.log("Existing zero-balance accounts funded:", fundedCount);
+  console.log("Existing positive balances preserved:", preservedBalanceCount);
+  console.log("Accounts skipped for safety:", skippedCount);
+
+  return {
+    eligibleCount,
+    createdCount,
+    fundedCount,
+    preservedBalanceCount,
+    skippedCount
+  };
 }
 
 module.exports = {
