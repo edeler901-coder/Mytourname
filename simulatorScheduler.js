@@ -9,6 +9,7 @@ const SCHEDULE_VERSION = 3;
 
 let schedulerStarted = false;
 let schedulerTimer = null;
+let registrationCycleRunning = false;
 
 function getAddisDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -578,44 +579,50 @@ async function registerSimulator(playerId, tournamentDate, entryFee) {
 }
 
 async function claimTask(taskRef, now) {
+  // This scheduler runs as a single Render process. Read and conditionally
+  // update the task directly; registerSimulator() independently protects
+  // wallet charging and duplicate registrations with Firebase transactions.
+  const snapshot = await taskRef.once("value");
+  const current = snapshot.val();
+
+  if (!current) return null;
+
+  const status = current.status || "pending";
+  const nextAttemptAt = Number(current.nextAttemptAt || current.runAt || 0);
+
+  if (status === "completed") return null;
+
+  if (status === "processing") {
+    const claimedAt = Number(current.claimedAt || 0);
+    if (now - claimedAt < PROCESSING_LEASE) return null;
+  } else if (
+    status !== "pending" &&
+    status !== "skipped_insufficient_funds" &&
+    status !== "failed"
+  ) {
+    return null;
+  } else if (nextAttemptAt > now) {
+    return null;
+  }
+
   const claimId = crypto.randomUUID();
-
-  const result = await taskRef.transaction(current => {
-    if (!current) return;
-
-    const status = current.status || "pending";
-    const nextAttemptAt = Number(current.nextAttemptAt || current.runAt || 0);
-
-    if (status === "completed") return;
-    if (status === "processing") {
-      const claimedAt = Number(current.claimedAt || 0);
-      if (now - claimedAt < PROCESSING_LEASE) return;
-    } else if (
-      status !== "pending" &&
-      status !== "skipped_insufficient_funds" &&
-      status !== "failed"
-    ) {
-      return;
-    } else if (nextAttemptAt > now) {
-      return;
-    }
-
-    return {
-      ...current,
-      status: "processing",
-      claimId,
-      claimedAt: now,
-      attempts: (Number(current.attempts) || 0) + 1,
-      lastAttemptAt: now
-    };
-  });
-
-  if (!result.committed) return null;
-
-  return {
+  const claimedTask = {
+    ...current,
+    status: "processing",
     claimId,
-    task: result.snapshot.val()
+    claimedAt: now,
+    attempts: (Number(current.attempts) || 0) + 1,
+    lastAttemptAt: now
   };
+
+  await taskRef.update(claimedTask);
+
+  const verifiedSnapshot = await taskRef.once("value");
+  const verifiedTask = verifiedSnapshot.val();
+
+  if (!verifiedTask || verifiedTask.claimId !== claimId) return null;
+
+  return { claimId, task: verifiedTask };
 }
 
 async function finishTask(taskRef, claimId, updates) {
@@ -692,6 +699,12 @@ async function rebuildDailyReport(schedule, tournament) {
 }
 
 async function processDueRegistrations() {
+  if (registrationCycleRunning) {
+    console.log("Simulator registration cycle skipped: previous cycle is still running.");
+    return;
+  }
+  registrationCycleRunning = true;
+
   try {
     const registrationDate = getAddisDate();
     const tournamentDate = getTomorrowDate(registrationDate);
@@ -872,6 +885,8 @@ async function processDueRegistrations() {
 
   } catch (error) {
     console.error("Simulator scheduler cycle failed:", error);
+  } finally {
+    registrationCycleRunning = false;
   }
 }
 
