@@ -404,7 +404,43 @@ async function showBrackets() {
     });
 
     updateGroupCountdowns();
-    bracketCountdownInterval = setInterval(updateGroupCountdowns,1000);
+
+    async function refreshOwnGroupPlayButton() {
+      if (!tg || !tg.initData) return;
+      try {
+        const response = await fetch(`${API_URL}/api/player/assignment`, {
+          headers: { "X-Telegram-Init-Data": tg.initData }
+        });
+        if (!response.ok) return;
+        const current = await response.json();
+        if (!current.assigned || !current.assignment.matchId) return;
+
+        const ownCard = Array.from(document.querySelectorAll("[data-group-card]"))
+          .find(card => card.dataset.matchId === current.assignment.matchId);
+        if (!ownCard) return;
+
+        const button = ownCard.querySelector(".group-play-button");
+        if (!button) return;
+
+        const status = String(current.matchStatus || "scheduled").toLowerCase();
+        const active = ["board_selection", "in_progress"].includes(status);
+        button.disabled = !active;
+        button.textContent = status === "board_selection"
+          ? "PLAY — SELECT BOARD"
+          : status === "in_progress"
+            ? "PLAY MATCH"
+            : "WAIT FOR MATCH TIME";
+        const note = ownCard.querySelector(".group-wait-note");
+        if (note) note.hidden = active;
+      } catch (error) {
+        console.error("Group play status refresh error:", error);
+      }
+    }
+
+    bracketCountdownInterval = setInterval(() => {
+      updateGroupCountdowns();
+      refreshOwnGroupPlayButton();
+    }, 5000);
   } catch(error) {
     console.error("Bracket loading error:",error);
     tabContent.innerHTML = `<h2>TOURNAMENT BRACKETS</h2><p>${safe(error.message)}</p>`;
