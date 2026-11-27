@@ -1886,3 +1886,29 @@ body {
   .prizes .prize-row { padding: 7px 12px; gap: 10px; }
   .prizes .prize-details strong { font-size: 19px; }
 }
+
+
+/* FIRST-PLACE PRIZE ROW — BADGE, PERCENTAGE AND AMOUNT IN ONE LINE */
+.prizes .prize-first .prize-details {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.prizes .prize-first .prize-details strong {
+  order: 1;
+  font-size: 22px;
+  white-space: nowrap;
+}
+.prizes .prize-first .prize-amount {
+  order: 2;
+  margin-left: auto;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.prizes .prize-first .prize-rank {
+  color: #ffe08a;
+  font-size: 19px;
+  font-weight: 900;
+  text-shadow: 0 0 12px #ffcb5688;
+}
