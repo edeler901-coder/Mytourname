@@ -2317,3 +2317,14 @@ body {
 .header .wallet h2 {
   font-size: 31.5px;
 }
+
+
+/* REDUCE INNER WALLET CONTAINER HEIGHT */
+.header .wallet {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.header .wallet h2 {
+  margin-top: 1px;
+}
