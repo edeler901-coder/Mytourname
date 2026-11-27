@@ -1912,3 +1912,31 @@ body {
   font-weight: 900;
   text-shadow: 0 0 12px #ffcb5688;
 }
+
+
+/* SECOND- AND THIRD-PLACE PRIZE ROWS — MATCH FIRST-PLACE HORIZONTAL LAYOUT */
+.prizes .prize-second .prize-details,
+.prizes .prize-third .prize-details {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.prizes .prize-second .prize-details strong,
+.prizes .prize-third .prize-details strong {
+  order: 1;
+  font-size: 22px;
+  white-space: nowrap;
+}
+.prizes .prize-second .prize-amount,
+.prizes .prize-third .prize-amount {
+  order: 2;
+  margin-left: auto;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.prizes .prize-second .prize-rank,
+.prizes .prize-third .prize-rank {
+  font-size: 19px;
+  font-weight: 900;
+}
