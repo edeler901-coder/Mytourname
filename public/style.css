@@ -1541,3 +1541,25 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: .4px;
 }
+
+
+/* EXPANDABLE PRELIMINARY GROUP CARDS */
+.group-card{background:#1b2038;border:1px solid #343b58;border-radius:12px;overflow:hidden;margin:0 0 10px;box-shadow:none}
+.group-card-toggle{width:100%;display:block;border:0;background:transparent;color:inherit;text-align:left;padding:15px 14px;cursor:pointer}
+.group-card-top,.group-card-meta{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.group-card-top strong{color:#b7bfd2;font-size:14px;margin:0;letter-spacing:0}
+.group-card-time{color:#e7eaf2;font-size:12px;text-align:right}
+.group-card-time .group-countdown{display:inline-block;margin-left:8px;color:#f3d66f;font-weight:800;font-size:12px}
+.group-card-meta{justify-content:flex-start;margin-top:10px}
+.group-status{display:inline-block!important;background:#596174!important;border:0!important;border-radius:20px!important;color:#fff!important;padding:5px 11px!important;margin:0!important;font-size:10px!important;font-weight:800}
+.group-player-count{color:#8791aa;font-size:11px;font-weight:700}
+.group-chevron{margin-left:auto;color:#8791aa;font-size:20px;line-height:1;transition:transform .2s ease}
+.group-card.expanded .group-chevron{transform:rotate(180deg)}
+.group-card-details{border-top:1px solid #343b58;padding:12px 14px 14px}
+.group-card-details[hidden]{display:none!important}
+.group-player-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}
+.group-player{min-width:0;color:#f0f2f7;font-size:12px;overflow-wrap:anywhere}
+.group-player:before{content:"•";color:#8791aa;margin-right:6px}
+.group-play-button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:9px;background:linear-gradient(135deg,#f5d65f,#dcae28);color:#211a0b;font-size:13px;font-weight:900}
+.group-play-button:disabled{background:#42485b;color:#aeb5c5;opacity:1}
+.group-wait-note{margin:9px 0 0!important;color:#929bb0!important;font-size:10px!important;text-align:center}
