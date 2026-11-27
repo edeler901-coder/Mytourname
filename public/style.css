@@ -2022,3 +2022,135 @@ body {
   font-variant-numeric: tabular-nums;
   text-shadow: 0 0 12px #f3d58a55;
 }
+
+
+/* COMPACT HEADER WITH WALLET */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 24px;
+}
+
+.header .logo {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  font-size: 23px;
+}
+
+.header-brand {
+  flex: 1 1 82px;
+  min-width: 0;
+}
+
+.header h1 {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+  line-height: 1.05;
+  letter-spacing: .7px;
+}
+
+.header h1 .brand-bingo {
+  color: var(--gold);
+}
+
+.header h1 .brand-champions {
+  color: #ffffff;
+}
+
+.header-brand p {
+  font-size: 7px;
+  letter-spacing: .7px;
+  line-height: 1.2;
+}
+
+.header .wallet {
+  flex: 0 1 142px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 8px;
+  gap: 4px;
+  border-radius: 12px;
+}
+
+.header .wallet p {
+  font-size: 7px;
+  line-height: 1.2;
+  letter-spacing: .25px;
+}
+
+.header .wallet h2 {
+  margin-top: 4px;
+  font-size: 17px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.header .wallet small {
+  font-size: 9px;
+}
+
+.header .wallet-icon {
+  font-size: 19px;
+}
+
+.header .live {
+  flex: 0 0 auto;
+  margin-left: 0;
+  padding: 7px 8px;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+@media (max-width: 360px) {
+  .header {
+    gap: 5px;
+  }
+
+  .header .logo {
+    flex-basis: 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+    font-size: 20px;
+  }
+
+  .header-brand {
+    flex-basis: 68px;
+  }
+
+  .header h1 {
+    font-size: 10px;
+    letter-spacing: .35px;
+  }
+
+  .header-brand p {
+    font-size: 6px;
+    letter-spacing: .2px;
+  }
+
+  .header .wallet {
+    flex-basis: 112px;
+    padding: 8px 6px;
+  }
+
+  .header .wallet p {
+    font-size: 6px;
+  }
+
+  .header .wallet h2 {
+    font-size: 15px;
+  }
+
+  .header .wallet-icon {
+    font-size: 15px;
+  }
+
+  .header .live {
+    padding: 6px 5px;
+    font-size: 7px;
+  }
+}
