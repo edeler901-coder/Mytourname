@@ -122,8 +122,12 @@ if (!TOKEN || !ADMIN_ID) {
           abortReason = "unknown";
 
           if (!player) {
+            // Return null (not undefined) so RTDB can compare-and-retry against
+            // the server value when the initial local transaction value is uncached.
+            // If the record is genuinely absent, the post-transaction check below
+            // will reject the result without reporting a credit.
             abortReason = "player_missing";
-            return;
+            return null;
           }
           if (player.phoneVerified !== true || player.phoneNumber !== session.phone) {
             abortReason = "phone_mismatch";
