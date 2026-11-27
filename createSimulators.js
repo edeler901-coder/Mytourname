@@ -169,7 +169,7 @@ async function createSimulators() {
 
       // Complete the original one-time funding only for accounts that
       // have not received that funding version yet.
-      if (Number(current.fundingVersion) < FUNDING_VERSION) {
+      if ((Number(current.fundingVersion) || 0) < FUNDING_VERSION) {
         if (currentBalance === 0) {
           current.balance = STARTING_BALANCE;
           fundedCount++;
@@ -183,7 +183,7 @@ async function createSimulators() {
 
       // One-time repair: top up only simulator wallets that cannot pay
       // the 200 Br registration fee. Never reduce a positive balance.
-      if (Number(current.lowBalanceTopupVersion) < LOW_BALANCE_TOPUP_VERSION) {
+      if ((Number(current.lowBalanceTopupVersion) || 0) < LOW_BALANCE_TOPUP_VERSION) {
         const balanceBeforeTopup = Number(current.balance);
 
         if (balanceBeforeTopup < MINIMUM_REGISTRATION_BALANCE) {
