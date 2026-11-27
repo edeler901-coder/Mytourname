@@ -695,18 +695,12 @@ async function processDueRegistrations() {
     const registrationDate = getAddisDate();
     const tournamentDate = getTomorrowDate(registrationDate);
 
-    let scheduleSnapshot = await db
+    const prepared = await prepareDailySchedule();
+    if (!prepared) return;
+
+    const scheduleSnapshot = await db
       .ref("simulatorSchedules/" + registrationDate)
       .once("value");
-
-    if (!scheduleSnapshot.exists()) {
-      const prepared = await prepareDailySchedule();
-      if (!prepared) return;
-
-      scheduleSnapshot = await db
-        .ref("simulatorSchedules/" + registrationDate)
-        .once("value");
-    }
 
     const schedule = scheduleSnapshot.val();
     if (!schedule || schedule.tournamentDate !== tournamentDate) return;
