@@ -437,10 +437,14 @@ async function showBrackets() {
       }
     }
 
+    let lastPlayStatusRefresh = 0;
     bracketCountdownInterval = setInterval(() => {
       updateGroupCountdowns();
-      refreshOwnGroupPlayButton();
-    }, 5000);
+      if (Date.now() - lastPlayStatusRefresh >= 5000) {
+        lastPlayStatusRefresh = Date.now();
+        refreshOwnGroupPlayButton();
+      }
+    }, 1000);
   } catch(error) {
     console.error("Bracket loading error:",error);
     tabContent.innerHTML = `<h2>TOURNAMENT BRACKETS</h2><p>${safe(error.message)}</p>`;
