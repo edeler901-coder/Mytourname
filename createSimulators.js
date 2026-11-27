@@ -1,7 +1,7 @@
 const { db } = require("./firebase");
 
 const STARTING_BALANCE = 10000;
-const FUNDING_VERSION = 1;
+const FUNDING_VERSION = 2;
 
 const usernames = [
   // 20 Habesha names
