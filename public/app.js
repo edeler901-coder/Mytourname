@@ -97,9 +97,31 @@ function updateTournamentStats(settings) {
       Number(settings.registeredPlayers || 0).toLocaleString("en-US");
   }
 
+  const totalPrizePool = Number(settings.prizePool || 0);
+
   if (prizePoolElement) {
     prizePoolElement.innerHTML =
-      `${Number(settings.prizePool || 0).toLocaleString("en-US")} <small>BR</small>`;
+      `${totalPrizePool.toLocaleString("en-US")} <small>BR</small>`;
+  }
+
+  const formatPrizeAmount = (amount) =>
+    `${amount.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    })} BR`;
+
+  const firstPrizeElement = document.getElementById("firstPrizeAmount");
+  const secondPrizeElement = document.getElementById("secondPrizeAmount");
+  const thirdPrizeElement = document.getElementById("thirdPrizeAmount");
+
+  if (firstPrizeElement) {
+    firstPrizeElement.textContent = formatPrizeAmount(totalPrizePool * 0.50);
+  }
+  if (secondPrizeElement) {
+    secondPrizeElement.textContent = formatPrizeAmount(totalPrizePool * 0.30);
+  }
+  if (thirdPrizeElement) {
+    thirdPrizeElement.textContent = formatPrizeAmount(totalPrizePool * 0.10);
   }
 }
 
