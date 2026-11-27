@@ -244,35 +244,80 @@ function showTab(tab) {
   }
 }
 
-function showBrackets() {
-  let groups = "";
+async function showBrackets() {
+  tabContent.innerHTML = "<h2>TOURNAMENT BRACKETS</h2><p>Loading live bracket...</p>";
 
-  for (let i = 1; i <= 32; i++) {
-    groups += `
-      <div class="bracket-group">
-        <strong>GROUP ${i}</strong>
-        <span>Awaiting assignment</span>
-      </div>
-    `;
+  function safe(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;",
+      "\"": "&quot;", "'": "&#39;"
+    })[char]);
   }
 
-  tabContent.innerHTML = `
-    <h2>TOURNAMENT BRACKETS</h2>
-    <p>32 groups · 32 qualifying places</p>
+  try {
+    const response = await fetch(`${API_URL}/api/tournament/brackets`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Bracket unavailable.");
 
-    <h3>PRELIMINARY ROUND</h3>
-    <div class="bracket-grid">
-      ${groups}
-    </div>
+    const groupRows = data.groups && data.groups.length
+      ? data.groups.map(group => `
+          <div class="bracket-group">
+            <strong>GROUP ${safe(group.groupNumber)}</strong>
+            <span>${safe(String(group.status || "scheduled").replaceAll("_", " ").toUpperCase())}</span>
+            <small>${safe(group.winner ? "Qualifier: " + group.winner : group.playerCount + " players")}</small>
+          </div>
+        `).join("")
+      : Array.from({ length: 32 }, (_, index) => `
+          <div class="bracket-group">
+            <strong>GROUP ${index + 1}</strong>
+            <span>Awaiting assignment</span>
+          </div>
+        `).join("");
 
-    <h3>KNOCKOUT STAGES</h3>
+    const stageDefinitions = [
+      ["round32", "ROUND OF 32 — 16 MATCHES"],
+      ["round16", "ROUND OF 16 — 8 MATCHES"],
+      ["quarterfinals", "QUARTER-FINALS — 4 MATCHES"],
+      ["semifinals", "SEMI-FINALS — 2 MATCHES"],
+      ["final", "GRAND FINAL"],
+      ["thirdPlace", "THIRD-PLACE MATCH"]
+    ];
 
-    <div class="bracket-round">ROUND OF 32 — 32 PLAYERS</div>
-    <div class="bracket-round">ROUND OF 16 — 16 PLAYERS</div>
-    <div class="bracket-round">QUARTER-FINALS — 8 PLAYERS</div>
-    <div class="bracket-round">SEMI-FINALS — 4 PLAYERS</div>
-    <div class="bracket-round">GRAND FINAL — 2 PLAYERS</div>
-  `;
+    const stageRows = stageDefinitions.map(([key, title]) => {
+      const stage = data.rounds && data.rounds[key];
+      if (!stage) {
+        return `<div class="bracket-round">${title} · Awaiting qualification</div>`;
+      }
+
+      const matches = (stage.matches || []).map(match => {
+        const players = (match.players || []).map(player => safe(player.name)).join(" vs ");
+        const status = safe(String(match.status || "scheduled").replaceAll("_", " ").toUpperCase());
+        const result = match.winner ? " · Winner: " + safe(match.winner) : "";
+        return `<div class="bracket-group">
+          <strong>MATCH ${safe(match.matchNumber || "")}</strong>
+          <span>${players || "Players pending"}</span>
+          <small>${status}${result}</small>
+        </div>`;
+      }).join("");
+
+      return `<h3>${title}</h3><div class="bracket-grid">${matches || "<p>Matches pending</p>"}</div>`;
+    }).join("");
+
+    tabContent.innerHTML = `
+      <h2>TOURNAMENT BRACKETS</h2>
+      <p>${safe(data.tournamentDate)} · 32 groups · 32 qualifying places</p>
+      <h3>PRELIMINARY ROUND</h3>
+      <div class="bracket-grid">${groupRows}</div>
+      <h3>KNOCKOUT STAGES</h3>
+      ${stageRows}
+    `;
+  } catch (error) {
+    console.error("Bracket loading error:", error);
+    tabContent.innerHTML = `
+      <h2>TOURNAMENT BRACKETS</h2>
+      <p>${safe(error.message)}</p>
+    `;
+  }
 }
 
 navButtons.forEach(button => {
