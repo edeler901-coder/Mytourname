@@ -73,9 +73,12 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
     let transactionAbortReason = null;
     const charge = await accountRef.transaction(account => {
       transactionAbortReason = null;
+      // Firebase may first invoke an Admin SDK transaction with a null
+      // local value even when the wallet exists remotely. Returning null
+      // asks RTDB to retry with the server value; undefined aborts immediately.
       if (!account) {
         transactionAbortReason = "wallet_missing_in_transaction";
-        return;
+        return null;
       }
       if (account.isSimulator !== true || account.accountType !== "simulator") {
         transactionAbortReason = "invalid_simulator_flags_in_transaction";
