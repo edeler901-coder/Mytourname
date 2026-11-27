@@ -71,7 +71,6 @@ async function processScheduledMatches() {
     const allMatches = [...preliminaryMatches, ...knockoutMatches];
 
     for (const group of allMatches) {
-      const matchLabel = group.roundLabel || ("Group " + group.groupNumber);
       if (
         !group ||
         !group.matchId ||
@@ -80,6 +79,8 @@ async function processScheduledMatches() {
       ) {
         continue;
       }
+
+      const matchLabel = group.roundLabel || ("Group " + group.groupNumber);
 
       try {
         const matchKey = `${tournamentDate}_${group.matchId}`;
@@ -241,7 +242,7 @@ async function processScheduledMatches() {
 
       } catch (error) {
         console.error(
-          `Group ${group.groupNumber} scheduler error:`,
+          `${matchLabel} scheduler error:`,
           error.message
         );
       }
