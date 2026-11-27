@@ -181,13 +181,17 @@ async function processTournamentProgression(tournamentDate) {
     const groupResults = await readCompletedWinners(tournamentDate, groups);
     if (!groupResults || groupResults.winners.length < 20) return;
 
+    const firstKnockoutAt = groupResults.latestCompletion > 0
+      ? groupResults.latestCompletion + GAME_SLOT_INTERVAL_MS
+      : Math.max(Date.now(), Number(tournament.startsAt) || Date.now());
+
     if (groupResults.winners.length === 32) {
       await saveNextStage(
         tournamentDate,
         "round32",
         "ROUND OF 32",
         groupResults.winners,
-        groupResults.latestCompletion + GAME_SLOT_INTERVAL_MS
+        firstKnockoutAt
       );
     } else {
       await saveNextStage(
@@ -195,7 +199,7 @@ async function processTournamentProgression(tournamentDate) {
         "playin",
         "KNOCKOUT QUALIFIER",
         groupResults.winners,
-        groupResults.latestCompletion + GAME_SLOT_INTERVAL_MS
+        firstKnockoutAt
       );
     }
     return;
