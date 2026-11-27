@@ -6,7 +6,9 @@ const TIME_ZONE = "Africa/Addis_Ababa";
 const ENTRY_FEE = 200;
 const CHECK_INTERVAL = 5 * 60 * 1000;
 const PROCESSING_LEASE = 10 * 60 * 1000;
-const SCHEDULE_VERSION = 3;
+const SCHEDULE_VERSION = 4;
+const MIN_DAILY_SIMULATORS = 55;
+const MAX_DAILY_SIMULATORS = 75;
 
 let schedulerStarted = false;
 let schedulerTimer = null;
@@ -61,56 +63,57 @@ function isSimulatorAccount(account) {
   );
 }
 
-function makeHourlyBatchTasks(playerIds, startAt, endAt, previousTasks = []) {
+function makeRandomRegistrationTasks(playerIds, startAt, endAt, previousTasks = [], targetCount) {
   const previousById = new Map();
 
   for (const task of previousTasks || []) {
-    if (task && task.playerId) previousById.set(String(task.playerId), task);
+    if (task && task.playerId) {
+      previousById.set(String(task.playerId), task);
+    }
   }
 
-  const remainingIds = shuffle(
-    playerIds.filter(id => {
-      const previous = previousById.get(String(id));
-      return !previous || previous.status !== "completed";
-    })
+  // Never remove a registration already completed for this tournament.
+  const completedTasks = [...previousById.values()].filter(
+    task => task.status === "completed"
+  );
+  const completedIds = new Set(
+    completedTasks.map(task => String(task.playerId))
   );
 
-  const tasks = [];
-  let cursor = 0;
-  let batchTime = startAt;
+  const selectedIds = [...completedIds];
+  const needed = Math.max(0, targetCount - selectedIds.length);
+  const candidates = shuffle(
+    playerIds.filter(id => !completedIds.has(String(id)))
+  );
+  selectedIds.push(...candidates.slice(0, needed));
 
-  while (cursor < remainingIds.length && batchTime < endAt) {
-    const batchSize = crypto.randomInt(11, 17);
-    const batch = remainingIds.slice(cursor, cursor + batchSize);
+  const duration = Math.max(0, endAt - startAt);
+  const tasks = selectedIds.map(playerId => {
+    const id = String(playerId);
+    const previous = previousById.get(id);
 
-    for (const playerId of batch) {
-      const previous = previousById.get(String(playerId));
+    if (previous && previous.status === "completed") return previous;
 
-      if (previous && previous.status === "processing") {
-        tasks.push(previous);
-        continue;
-      }
+    // Random timestamp across the remaining Addis Ababa registration day.
+    const runAt = duration > 0
+      ? startAt + crypto.randomInt(duration + 1)
+      : startAt;
 
-      tasks.push({
-        playerId: String(playerId),
-        runAt: batchTime,
-        status: "pending",
-        attempts: Number(previous && previous.attempts) || 0,
-        nextAttemptAt: batchTime,
-        lastError: previous && previous.lastError
-          ? previous.lastError
-          : null
-      });
-    }
+    return {
+      playerId: id,
+      runAt,
+      status: "pending",
+      attempts: Number(previous && previous.attempts) || 0,
+      nextAttemptAt: runAt,
+      lastError: previous && previous.lastError
+        ? previous.lastError
+        : null
+    };
+  });
 
-    cursor += batch.length;
-    batchTime += 60 * 60 * 1000;
-  }
-
-  // Keep already completed registrations in the schedule/report.
-  for (const playerId of playerIds) {
-    const previous = previousById.get(String(playerId));
-    if (previous && previous.status === "completed") tasks.push(previous);
+  return tasks.sort((a, b) => Number(a.runAt || 0) - Number(b.runAt || 0));
+}
+tus === "completed") tasks.push(previous);
   }
 
   return tasks;
@@ -172,54 +175,45 @@ async function prepareDailySchedule() {
     Number(tournament.registrationClosesAt) || getAddisDayEnd(registrationDate)
   );
 
+  // Pick the daily target once outside the Firebase transaction callback.
+  // This keeps the target stable if Firebase retries the transaction.
+  const dailyTarget = Math.min(
+    simulatorIds.length,
+    crypto.randomInt(
+      Math.min(MIN_DAILY_SIMULATORS, simulatorIds.length),
+      Math.min(MAX_DAILY_SIMULATORS, simulatorIds.length) + 1
+    )
+  );
+  const startAt = Math.max(now, getAddisDayStart(registrationDate));
+  const shuffledIds = shuffle(simulatorIds);
+
   const transaction = await scheduleRef.transaction(current => {
     if (
       current &&
       current.version === SCHEDULE_VERSION &&
       current.tournamentDate === tournamentDate
     ) {
-      const existingIds = new Set(
-        (current.tasks || []).map(task => String(task.playerId))
-      );
-      const missingIds = simulatorIds.filter(id => !existingIds.has(id));
-
-      if (missingIds.length === 0) return current;
-
-      const previousTasks = current.tasks || [];
-      const remainingStart = Math.max(now, getAddisDayStart(registrationDate));
-      const tasks = makeHourlyBatchTasks(
-        simulatorIds,
-        remainingStart,
-        dayEnd,
-        previousTasks
-      );
-
-      return {
-        ...current,
-        version: SCHEDULE_VERSION,
-        tasks,
-        totalSimulators: simulatorIds.length,
-        updatedAt: now
-      };
+      return current;
     }
 
     const previousTasks = current && current.tournamentDate === tournamentDate
       ? current.tasks || []
       : [];
 
-    const startAt = Math.max(now, getAddisDayStart(registrationDate));
-    const tasks = makeHourlyBatchTasks(
-      simulatorIds,
+    const tasks = makeRandomRegistrationTasks(
+      shuffledIds,
       startAt,
       dayEnd,
-      previousTasks
+      previousTasks,
+      dailyTarget
     );
 
     return {
       version: SCHEDULE_VERSION,
       registrationDate,
       tournamentDate,
-      totalSimulators: simulatorIds.length,
+      totalSimulators: tasks.length,
+      dailyTarget: tasks.length,
       createdAt: current && current.createdAt
         ? current.createdAt
         : now,
@@ -237,7 +231,7 @@ async function prepareDailySchedule() {
     tournamentDate +
     ": " +
     schedule.totalSimulators +
-    " existing simulator accounts."
+    " randomly selected simulator accounts for today."
   );
 
   return schedule;
