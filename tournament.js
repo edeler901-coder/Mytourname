@@ -59,7 +59,7 @@ function createGroupSchedule(startTime) {
   for (let i = 0; i < TOTAL_GROUPS; i++) {
     const gameTime = new Date(
       startTime.getTime() +
-      i * GROUP_INTERVAL_MINUTES * 60 * 1000
+      Math.floor(i / 2) * GROUP_INTERVAL_MINUTES * 60 * 1000
     );
 
     schedule.push({
