@@ -79,24 +79,32 @@ async function ensureTomorrowTournament() {
 
   let created = false;
 
-  const result = await tournamentRef.transaction((current) => {
-    if (current) {
-      created = false;
-      return current;
+  const result = await tournamentRef.transaction(current => {
+    if (!current) {
+      created = true;
+      return tournament;
     }
 
-    created = true;
-    return tournament;
+    created = false;
+
+    // Reopen registration on the existing record without replacing
+    // its registrations, payments, tournament settings, or other data.
+    return {
+      ...current,
+      registrationOpen: true,
+      registrationDate,
+      registrationClosesAt: tournament.registrationClosesAt
+    };
   });
 
   if (!result.committed) {
-    throw new Error("Unable to create or read the tournament record.");
+    throw new Error("Unable to create or update the tournament record.");
   }
 
   console.log(
     created
       ? `Tournament record created: ${tournamentDate}`
-      : `Tournament record already exists: ${tournamentDate}`
+      : `Tournament registration confirmed open: ${tournamentDate}`
   );
 
   return result.snapshot.val();
