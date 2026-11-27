@@ -213,6 +213,26 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
   return { success:true, balance:player.balance, alreadyRegistered };
 }
 
+// Check whether the authenticated player is already registered for tomorrow.
+router.get("/status", requireTelegramAuth, async (req, res) => {
+  try {
+    const tournamentDate = getTomorrowDate();
+    const playerSnapshot = await db
+      .ref("players/" + String(req.telegramUser.id) + "/tournamentRegistrations/" + tournamentDate)
+      .once("value");
+
+    const registration = playerSnapshot.val();
+
+    return res.json({
+      registered: Boolean(registration && registration.status === "registered"),
+      tournamentDate
+    });
+  } catch (error) {
+    console.error("Registration status error:", error);
+    return res.status(500).json({ error: "Could not check registration status." });
+  }
+});
+
 // Human registration endpoint
 router.post("/register", requireTelegramAuth, async (req, res) => {
   try {
