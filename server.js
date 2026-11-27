@@ -189,8 +189,10 @@ app.get("/api/tournament/brackets", async (req, res) => {
         const summary = await summarize(group, "GROUP " + group.groupNumber);
         return {
           groupNumber: group.groupNumber,
+          matchId: summary.matchId,
           status: summary.status,
           playerCount: summary.players.length,
+          players: summary.players,
           winner: summary.winner,
           scheduledAt: summary.scheduledAt
         };
@@ -284,10 +286,19 @@ app.get("/api/player/assignment", requireTelegramAuth, async (req, res) => {
       });
     }
 
+    const assignment = snapshot.val();
+    const matchSnapshot = assignment.matchId
+      ? await db.ref(
+          `tournaments/${tournamentDate}/matches/${assignment.matchId}`
+        ).once("value")
+      : null;
+    const match = matchSnapshot ? matchSnapshot.val() : null;
+
     return res.json({
       success: true,
       assigned: true,
-      assignment: snapshot.val()
+      assignment,
+      matchStatus: match ? match.status : "scheduled"
     });
 
   } catch (error) {
