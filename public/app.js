@@ -97,6 +97,14 @@ function updateTournamentStats(settings) {
       Number(settings.registeredPlayers || 0).toLocaleString("en-US");
   }
 
+  const totalCollected = Number(settings.grossContributions || 0);
+  const collectedElement = document.getElementById("totalCollected");
+
+  if (collectedElement) {
+    collectedElement.innerHTML =
+      `${totalCollected.toLocaleString("en-US")} <small>BR</small>`;
+  }
+
   const totalPrizePool = Number(settings.prizePool || 0);
 
   if (prizePoolElement) {
