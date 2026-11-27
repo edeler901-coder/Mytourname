@@ -400,7 +400,7 @@ async function loadMyMatch() {
       <h2>YOUR MATCH</h2>
 
       <div class="tournament-card">
-        <p>GROUP ${match.groupNumber}</p>
+        <p>${match.roundLabel || ("GROUP " + match.groupNumber)}</p>
         <h2>Match ${match.matchId}</h2>
         <p>Scheduled time: ${matchTime}</p>
         <p>Status: ${match.status.replaceAll("_", " ").toUpperCase()}</p>
