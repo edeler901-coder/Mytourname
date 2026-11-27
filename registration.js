@@ -45,157 +45,169 @@ function getRegistrationDeadline(date) {
   return Date.UTC(year, month - 1, day + 1, -3, 0, 0);
 }
 
-// Shared registration function
-async function registerPlayerForTournament(telegramId, tournament) {
-  telegramId = String(telegramId);
+// Shared registration function for human and simulator players.
+async function registerPlayerForTournament(playerId, tournament, options = {}) {
+  const id = String(playerId || "");
+  const simulator = options.accountType === "simulator";
+  const tournamentId = String(tournament.id || tournament.tournamentDate || "");
+  const fee = Number(tournament.entryFee || ENTRY_FEE);
 
-  const tournamentId = String(tournament.id || "");
-  const entryFee = Number(tournament.entryFee || ENTRY_FEE);
-
-  if (
-    !telegramId ||
-    /[.#$\[\]\/]/.test(telegramId) ||
-    !tournamentId ||
-    /[.#$\[\]\/]/.test(tournamentId) ||
-    !Number.isFinite(entryFee) ||
-    entryFee <= 0
-  ) {
+  if (!id || /[.#$\[\]\/]/.test(id) || !tournamentId ||
+      /[.#$\[\]\/]/.test(tournamentId) || !Number.isFinite(fee) || fee <= 0) {
     throw new Error("Invalid registration information.");
   }
-
-  if (
-    tournament.registrationOpen !== true ||
-    tournament.tournamentDate !== tournamentId
-  ) {
+  if (tournament.registrationOpen !== true ||
+      tournament.tournamentDate !== tournamentId) {
     throw new Error("Tournament registration is closed.");
   }
+  const today = getAddisDate();
+  if (tournamentId !== getTomorrowDate()) throw new Error("This is not the next tournament.");
+  if (Date.now() >= getRegistrationDeadline(today)) throw new Error("Registration deadline has passed.");
 
-  const registrationDate = getAddisDate();
+  const accountRef = db.ref((simulator ? "simulators/" : "players/") + id);
+  const listRef = db.ref("tournaments/" + tournamentId + "/registrations/" + id);
+  const now = Date.now();
 
-  if (tournamentId !== getTomorrowDate()) {
-    throw new Error("This is not the next tournament.");
+  if (simulator) {
+    const txId = "sim_entry_" + tournamentId + "_" + id;
+    const charge = await accountRef.transaction(account => {
+      if (!account || account.isSimulator !== true || account.accountType !== "simulator") return;
+      account.simulatorTransactions = account.simulatorTransactions || {};
+      account.simulatorRegistrations = account.simulatorRegistrations || {};
+      const prior = account.simulatorTransactions[txId];
+      if (prior) {
+        if (prior.type === "simulator_entry_fee" &&
+            Number(prior.amount) === fee && prior.status === "completed") return account;
+        return;
+      }
+      const old = account.simulatorRegistrations[tournamentId];
+      if (old && old.status === "registered" &&
+          old.paymentSource === "simulator_wallet" && Number(old.entryFee) === fee) {
+        account.simulatorTransactions[txId] = {
+          type:"simulator_entry_fee", amount:fee, tournamentDate:tournamentId,
+          status:"completed", recoveredFromExistingRegistration:true,
+          createdAt:old.registeredAt || now
+        };
+        return account;
+      }
+      const balance = Number(account.balance);
+      if (!Number.isFinite(balance) || balance < fee) return;
+      account.balance = balance - fee;
+      account.simulatorTransactions[txId] = {
+        type:"simulator_entry_fee", amount:fee, tournamentDate:tournamentId,
+        status:"completed", createdAt:now
+      };
+      account.simulatorRegistrations[tournamentId] = {
+        tournamentDate:tournamentId, entryFee:fee, registeredAt:now,
+        status:"registered", paymentSource:"simulator_wallet",
+        simulatorTransactionId:txId
+      };
+      return account;
+    });
+
+    const account = charge.snapshot.val();
+    if (!account || account.isSimulator !== true || account.accountType !== "simulator") {
+      throw new Error("Simulator account is missing or has invalid account flags.");
+    }
+    const payment = account.simulatorTransactions && account.simulatorTransactions[txId];
+    if (!payment) {
+      const balance = Number(account.balance);
+      if (!Number.isFinite(balance) || balance < fee) {
+        return { success:false, status:"insufficient_funds", balance:account.balance };
+      }
+      throw new Error("Simulator wallet transaction did not complete; balance was not deducted.");
+    }
+    if (payment.type !== "simulator_entry_fee" || Number(payment.amount) !== fee ||
+        payment.status !== "completed") throw new Error("Simulator payment could not be verified.");
+
+    const entry = account.simulatorRegistrations && account.simulatorRegistrations[tournamentId];
+    if (!entry || entry.status !== "registered" || Number(entry.entryFee) !== fee ||
+        entry.paymentSource !== "simulator_wallet") {
+      throw new Error("Simulator payment is saved; registration recovery is required.");
+    }
+    const listed = await listRef.transaction(existing => {
+      if (existing) {
+        if (existing.status === "registered" && existing.isSimulator === true &&
+            String(existing.playerId || existing.telegramId) === id) return existing;
+        return;
+      }
+      return {
+        telegramId:id, playerId:id, tournamentId, tournamentDate:tournamentId,
+        entryFee:fee, registeredAt:entry.registeredAt || now, status:"registered",
+        isSimulator:true, paymentSource:"simulator_wallet", simulatorTransactionId:txId,
+        displayName:account.displayName || account.username || id,
+        username:account.username || account.displayName || id
+      };
+    });
+    const finalEntry = listed.snapshot.val();
+    if (!finalEntry || finalEntry.status !== "registered" || finalEntry.isSimulator !== true ||
+        String(finalEntry.playerId || finalEntry.telegramId) !== id) {
+      throw new Error("Simulator payment is saved; tournament registration recovery is required.");
+    }
+    await db.ref("simulatorTournaments/" + tournamentId + "/registrations/" + id)
+      .transaction(existing => existing && existing.status === "registered" ? existing : ({
+        playerId:id, username:account.username || account.displayName || id,
+        displayName:account.displayName || account.username || id,
+        tournamentDate:tournamentId, entryFee:fee,
+        registeredAt:finalEntry.registeredAt, paymentSource:"simulator_wallet",
+        simulatorTransactionId:txId, status:"registered"
+      }));
+    return { success:true, status:"registered", balance:account.balance };
   }
 
-  if (Date.now() >= getRegistrationDeadline(registrationDate)) {
-    throw new Error("Registration deadline has passed.");
-  }
-
-  const playerRef = db.ref(`players/${telegramId}`);
-  const registrationToken = crypto.randomUUID();
-  const registeredAt = Date.now();
-
-  // Deduct the entry fee and record registration atomically
-  const result = await playerRef.transaction((player) => {
+  const token = crypto.randomUUID();
+  const result = await accountRef.transaction(player => {
     if (!player) return;
-
-    // Accept numeric balances stored as either numbers or numeric strings,
-    // then persist the debited balance as a number.
     const balance = Number(player.balance);
     if (!Number.isFinite(balance)) return;
-
-    if (!player.tournamentRegistrations) {
-      player.tournamentRegistrations = {};
-    }
-
-    // An existing registration is returned unchanged: never charge twice.
-    if (player.tournamentRegistrations[tournamentId]) {
-      return player;
-    }
-
-    if (balance < entryFee) return;
-
-    player.balance = balance - entryFee;
-
+    player.tournamentRegistrations = player.tournamentRegistrations || {};
+    if (player.tournamentRegistrations[tournamentId]) return player;
+    if (balance < fee) return;
+    player.balance = balance - fee;
     player.tournamentRegistrations[tournamentId] = {
-      tournamentId,
-      entryFee,
-      registeredAt,
-      registrationToken,
-      status: "registered"
+      tournamentId, entryFee:fee, registeredAt:now,
+      registrationToken:token, status:"registered"
     };
-
     return player;
   });
-
   const player = result.snapshot.val();
-
-  const registration =
-    player?.tournamentRegistrations?.[tournamentId];
-
-  if (!player) {
-    throw new Error("Player account was not found. No entry fee was charged.");
-  }
-
+  const registration = player && player.tournamentRegistrations &&
+    player.tournamentRegistrations[tournamentId];
+  if (!player) throw new Error("Player account was not found. No entry fee was charged.");
   if (!registration) {
-    const availableBalance = Number(player.balance);
-
-    if (!Number.isFinite(availableBalance)) {
-      throw new Error("Your wallet balance is invalid. No entry fee was charged.");
-    }
-
-    if (availableBalance < entryFee) {
-      throw new Error(
-        `Insufficient balance. Entry fee: ${entryFee} Br; available balance: ${availableBalance} Br. No entry fee was charged.`
-      );
-    }
-
+    const balance = Number(player.balance);
+    if (!Number.isFinite(balance)) throw new Error("Your wallet balance is invalid. No entry fee was charged.");
+    if (balance < fee) throw new Error("Insufficient balance. Entry fee: " + fee +
+      " Br; available balance: " + balance + " Br. No entry fee was charged.");
     throw new Error("Registration transaction did not complete. No entry fee was charged.");
   }
-
-  const alreadyRegistered =
-    registration.registrationToken !== registrationToken;
-
-  // Repair or create the tournament registration list
-  const registrationRef = db.ref(
-    `tournaments/${tournamentId}/registrations/${telegramId}`
-  );
-
-  await registrationRef.transaction((existing) => {
-    if (existing) return existing;
-
-    return {
-      telegramId,
-      tournamentId,
-      entryFee: registration.entryFee,
-      registeredAt: registration.registeredAt,
-      status: "registered"
-    };
-  });
-
-  // Award the referral bonus only after the player's registration exists.
-  // The referrer's transaction records each referred player once, preventing duplicate rewards.
+  const alreadyRegistered = registration.registrationToken !== token;
+  const listed = await listRef.transaction(existing => existing || ({
+    telegramId:id, tournamentId, entryFee:registration.entryFee,
+    registeredAt:registration.registeredAt, status:"registered"
+  }));
+  if (!listed.snapshot.val() || listed.snapshot.val().status !== "registered") {
+    throw new Error("Player payment is saved; tournament registration recovery is required.");
+  }
   const referrerId = String(player.referredBy || "");
-  if (referrerId && referrerId !== telegramId) {
-    const referrerRef = db.ref(`players/${referrerId}`);
-    await referrerRef.transaction((referrer) => {
+  if (referrerId && referrerId !== id) {
+    await db.ref("players/" + referrerId).transaction(referrer => {
       if (!referrer) return;
       referrer.referralRewards = referrer.referralRewards || {};
-      if (referrer.referralRewards[telegramId]) return referrer;
+      if (referrer.referralRewards[id]) return referrer;
       referrer.balance = Number(referrer.balance || 0) + 10;
-      referrer.referralRewards[telegramId] = {
-        referredPlayerId: telegramId,
-        amount: 10,
-        status: "paid",
-        paidAt: Date.now(),
-        tournamentId
+      referrer.referralRewards[id] = {
+        referredPlayerId:id, amount:10, status:"paid", paidAt:Date.now(), tournamentId
       };
       referrer.transactions = referrer.transactions || {};
-      referrer.transactions["referral_" + telegramId] = {
-        type: "referral_reward",
-        amount: 10,
-        status: "paid",
-        referredPlayerId: telegramId,
-        createdAt: Date.now()
+      referrer.transactions["referral_" + id] = {
+        type:"referral_reward", amount:10, status:"paid",
+        referredPlayerId:id, createdAt:Date.now()
       };
       return referrer;
     });
   }
-
-  return {
-    success: true,
-    balance: player.balance,
-    alreadyRegistered
-  };
+  return { success:true, balance:player.balance, alreadyRegistered };
 }
 
 // Human registration endpoint
