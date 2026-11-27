@@ -254,41 +254,34 @@ let bracketCountdownInterval = null;
 function updateGroupCountdowns() {
   document.querySelectorAll("[data-group-countdown]").forEach(timer => {
     const status = String(timer.dataset.status || "scheduled").toLowerCase();
-
     if (status === "completed") {
       timer.textContent = "COMPLETED";
       return;
     }
-
     if (status === "in_progress" || status === "board_selection") {
-      timer.textContent = status === "board_selection" ? "BOARD SELECTION OPEN" : "LIVE NOW";
+      timer.textContent = status === "board_selection" ? "BOARD SELECTION" : "LIVE NOW";
       return;
     }
-
     const startAt = Date.parse(timer.dataset.startAt || "");
     if (!Number.isFinite(startAt)) {
       timer.textContent = "SCHEDULE PENDING";
       return;
     }
-
     const remaining = Math.max(0, startAt - Date.now());
     if (remaining === 0) {
-      timer.textContent = "START TIME REACHED";
+      timer.textContent = "STARTING";
       return;
     }
-
     const totalSeconds = Math.floor(remaining / 1000);
     const days = Math.floor(totalSeconds / 86400);
     const hours = Math.floor((totalSeconds % 86400) / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    const clock = [hours, minutes, seconds]
-      .map(value => String(value).padStart(2, "0"))
-      .join(":");
-
     timer.textContent = days > 0
-      ? `STARTS IN ${days}d ${clock}`
-      : `STARTS IN ${clock}`;
+      ? `${days}d ${hours}h ${minutes}m`
+      : hours > 0
+        ? `${hours}h ${minutes}m ${seconds}s`
+        : `${minutes}m ${seconds}s`;
   });
 }
 
@@ -325,42 +318,54 @@ async function showBrackets() {
       ? data.groups.map(group => {
           const isMyGroup = Boolean(myMatchId && group.matchId === myMatchId);
           const players = (group.players || []).map(player =>
-            `<div class="group-player">${safe(player.name)}</div>`
+            `<div class="group-player"><span class="group-player-dot"></span><span class="group-player-name">${safe(player.name)}</span></div>`
           ).join("");
           const status = String(group.status || "scheduled").toLowerCase();
           const canPlay = isMyGroup && ["board_selection", "in_progress"].includes(myMatchStatus);
+          const scheduledDate = group.scheduledAt
+            ? new Date(group.scheduledAt).toLocaleString("en-US", {
+                timeZone: "Africa/Addis_Ababa",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: true
+              })
+            : "Schedule pending";
+          const matchLabel = group.matchNumber || group.groupNumber;
           const buttonLabel = myMatchStatus === "board_selection" ? "PLAY — SELECT BOARD" : "PLAY MATCH";
           return `
-            <article class="bracket-group group-card" data-group-card>
+            <article class="group-card" data-group-card data-match-id="${safe(group.matchId || "")}">
               <button type="button" class="group-card-toggle" aria-expanded="false">
                 <span class="group-card-top">
-                  <strong>GROUP ${safe(group.groupNumber)}</strong>
+                  <strong>Match #${safe(matchLabel)}</strong>
                   <span class="group-card-time">
-                    ${safe(group.scheduledAt ? new Date(group.scheduledAt).toLocaleTimeString("en-US", {timeZone:"Africa/Addis_Ababa",hour:"2-digit",minute:"2-digit"}) : "Time pending")}
+                    <span class="group-clock-icon" aria-hidden="true">◷</span>
+                    <span class="group-scheduled-date">${safe(scheduledDate)}</span>
                     <b class="group-countdown" data-group-countdown data-start-at="${safe(group.scheduledAt || "")}" data-status="${safe(status)}">Loading...</b>
                   </span>
                 </span>
                 <span class="group-card-meta">
-                  <span class="group-status">${safe(status.replaceAll("_"," ").toUpperCase())}</span>
-                  <span class="group-player-count">${safe(group.playerCount)} PLAYERS</span>
-                  <span class="group-chevron">⌄</span>
+                  <span class="group-status">${safe(status === "scheduled" ? "Scheduled" : status.replaceAll("_", " "))}</span>
+                  <span class="group-player-count">${safe(group.playerCount)}P</span>
+                  <span class="group-chevron" aria-hidden="true">⌄</span>
                 </span>
               </button>
               <div class="group-card-details" hidden>
-                <div class="group-player-list">${players || "<span>Players will appear after assignments.</span>"}</div>
+                <div class="group-player-list">${players || '<span class="group-empty">Players will appear after assignments.</span>'}</div>
                 ${isMyGroup ? `<button type="button" class="group-play-button" ${canPlay ? "" : "disabled"}>${canPlay ? buttonLabel : "WAIT FOR MATCH TIME"}</button>` : ""}
-                ${isMyGroup && !canPlay ? '<p class="group-wait-note">Your PLAY button activates when the 100-second board-selection window opens.</p>' : ""}
+                ${isMyGroup && !canPlay ? '<p class="group-wait-note">PLAY opens when your 100-second board-selection window begins.</p>' : ""}
               </div>
             </article>
           `;
         }).join("")
       : Array.from({length:32},(_,index)=>`
-          <article class="bracket-group group-card">
+          <article class="group-card" data-group-card>
             <button type="button" class="group-card-toggle" aria-expanded="false">
-              <span class="group-card-top"><strong>GROUP ${index+1}</strong><span>Schedule pending</span></span>
-              <span class="group-card-meta"><span class="group-status">AWAITING ASSIGNMENT</span><span class="group-chevron">⌄</span></span>
+              <span class="group-card-top"><strong>Match #${index+1}</strong><span class="group-scheduled-date">Schedule pending</span></span>
+              <span class="group-card-meta"><span class="group-status">Scheduled</span><span class="group-player-count">0P</span><span class="group-chevron" aria-hidden="true">⌄</span></span>
             </button>
-            <div class="group-card-details" hidden><p>Players will appear after assignments.</p></div>
+            <div class="group-card-details" hidden><p class="group-empty">Players will appear after assignments.</p></div>
           </article>
         `).join("");
 
@@ -386,7 +391,7 @@ async function showBrackets() {
     tabContent.innerHTML = `
       <h2>TOURNAMENT BRACKETS</h2>
       <p>${safe(data.tournamentDate)} · 32 groups · 32 qualifying places</p>
-      <h3>PRELIMINARY ROUND</h3><div class="bracket-grid">${groupRows}</div>
+      <h3>PRELIMINARY ROUND</h3><div class="group-card-list">${groupRows}</div>
       <h3>KNOCKOUT STAGES</h3>${stageRows}
     `;
 
@@ -400,7 +405,7 @@ async function showBrackets() {
         card.classList.toggle("expanded", !expanded);
       });
       const play = card.querySelector(".group-play-button");
-      if (play && !play.disabled) play.addEventListener("click", openGameRoom);
+      if (play) play.addEventListener("click", openGameRoom);
     });
 
     updateGroupCountdowns();
