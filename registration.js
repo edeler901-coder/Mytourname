@@ -70,14 +70,24 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
 
   if (simulator) {
     const txId = "sim_entry_" + tournamentId + "_" + id;
+    let transactionAbortReason = null;
     const charge = await accountRef.transaction(account => {
-      if (!account || account.isSimulator !== true || account.accountType !== "simulator") return;
+      transactionAbortReason = null;
+      if (!account) {
+        transactionAbortReason = "wallet_missing_in_transaction";
+        return;
+      }
+      if (account.isSimulator !== true || account.accountType !== "simulator") {
+        transactionAbortReason = "invalid_simulator_flags_in_transaction";
+        return;
+      }
       account.simulatorTransactions = account.simulatorTransactions || {};
       account.simulatorRegistrations = account.simulatorRegistrations || {};
       const prior = account.simulatorTransactions[txId];
       if (prior) {
         if (prior.type === "simulator_entry_fee" &&
             Number(prior.amount) === fee && prior.status === "completed") return account;
+        transactionAbortReason = "existing_transaction_conflict";
         return;
       }
       const old = account.simulatorRegistrations[tournamentId];
@@ -91,7 +101,10 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
         return account;
       }
       const balance = Number(account.balance);
-      if (!Number.isFinite(balance) || balance < fee) return;
+      if (!Number.isFinite(balance) || balance < fee) {
+        transactionAbortReason = "insufficient_or_invalid_balance";
+        return;
+      }
       account.balance = balance - fee;
       account.simulatorTransactions[txId] = {
         type:"simulator_entry_fee", amount:fee, tournamentDate:tournamentId,
@@ -119,7 +132,20 @@ async function registerPlayerForTournament(playerId, tournament, options = {}) {
       if (!Number.isFinite(balance) || balance < fee) {
         return { success:false, status:"insufficient_funds", balance:account.balance };
       }
-      throw new Error("Simulator wallet transaction did not complete; balance was not deducted.");
+      console.error("Simulator wallet transaction aborted:", {
+        playerId: id,
+        tournamentDate: tournamentId,
+        committed: charge.committed,
+        abortReason: transactionAbortReason || "unknown_transaction_abort",
+        balance,
+        isSimulator: account.isSimulator,
+        accountType: account.accountType,
+        transactionIdExists: Boolean(account.simulatorTransactions && account.simulatorTransactions[txId]),
+        registrationExists: Boolean(account.simulatorRegistrations && account.simulatorRegistrations[tournamentId])
+      });
+      throw new Error("Simulator wallet transaction aborted: " +
+        (transactionAbortReason || "unknown_transaction_abort") +
+        "; balance was not deducted.");
     }
     if (payment.type !== "simulator_entry_fee" || Number(payment.amount) !== fee ||
         payment.status !== "completed") throw new Error("Simulator payment could not be verified.");
