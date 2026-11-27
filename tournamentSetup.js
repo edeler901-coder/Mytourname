@@ -91,6 +91,9 @@ async function ensureTomorrowTournament() {
     // its registrations, payments, tournament settings, or other data.
     return {
       ...current,
+      // Keep the existing tournament's entry fee aligned with the
+      // configured fee used by human and simulator registration.
+      entryFee: ENTRY_FEE,
       registrationOpen: true,
       registrationDate,
       registrationClosesAt: tournament.registrationClosesAt
