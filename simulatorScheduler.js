@@ -370,6 +370,15 @@ async function registerSimulator(playerId, tournamentDate, entryFee) {
   const accountSnapshot = await accountRef.once("value");
   const accountBeforeCharge = accountSnapshot.val();
 
+  console.log("Simulator wallet check:", {
+    playerId: id,
+    walletBalance: accountBeforeCharge ? accountBeforeCharge.balance : null,
+    numericWalletBalance: accountBeforeCharge ? Number(accountBeforeCharge.balance) : null,
+    entryFee: fee,
+    fundingVersion: accountBeforeCharge ? accountBeforeCharge.fundingVersion : null,
+    lowBalanceTopupVersion: accountBeforeCharge ? accountBeforeCharge.lowBalanceTopupVersion : null
+  });
+
   if (!isSimulatorAccount(accountBeforeCharge)) {
     await removeUnpaidReservation(registrationRef, id);
     throw new Error("Simulator account is missing or has invalid account flags.");
@@ -454,7 +463,15 @@ async function registerSimulator(playerId, tournamentDate, entryFee) {
     }
 
     const balance = Number(account.balance);
-    if (!Number.isFinite(balance) || balance < fee) return;
+    if (!Number.isFinite(balance) || balance < fee) {
+      console.log("Simulator wallet rejected for insufficient funds:", {
+        playerId: id,
+        balance: account.balance,
+        numericBalance: balance,
+        requiredEntryFee: fee
+      });
+      return;
+    }
 
     account.balance = balance - fee;
     account.simulatorTransactions[transactionId] = {
