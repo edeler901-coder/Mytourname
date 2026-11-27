@@ -600,13 +600,14 @@ async function claimTask(taskRef, now) {
       return;
     }
 
-    current.status = "processing";
-    current.claimId = claimId;
-    current.claimedAt = now;
-    current.attempts = (Number(current.attempts) || 0) + 1;
-    current.lastAttemptAt = now;
-
-    return current;
+    return {
+      ...current,
+      status: "processing",
+      claimId,
+      claimedAt: now,
+      attempts: (Number(current.attempts) || 0) + 1,
+      lastAttemptAt: now
+    };
   });
 
   if (!result.committed) return null;
