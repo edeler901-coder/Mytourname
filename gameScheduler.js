@@ -75,7 +75,7 @@ async function processScheduledMatches() {
         !group ||
         !group.matchId ||
         !Array.isArray(group.players) ||
-        group.players.length === 0
+        group.players.length < 2
       ) {
         continue;
       }
