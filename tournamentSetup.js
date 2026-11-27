@@ -87,12 +87,16 @@ async function ensureTomorrowTournament() {
 
     created = false;
 
-    // Reopen registration on the existing record without replacing
-    // its registrations, payments, tournament settings, or other data.
+    // Never reopen a tournament whose midnight assignment already ran.
+    if (current.assignmentsCreatedAt || current.status === "assigned" ||
+        current.status === "completed") {
+      return current;
+    }
+
+    // Keep an unassigned next-day registration open without replacing
+    // its registrations, payments, or existing tournament settings.
     return {
       ...current,
-      // Keep the existing tournament's entry fee aligned with the
-      // configured fee used by human and simulator registration.
       entryFee: ENTRY_FEE,
       registrationOpen: true,
       registrationDate,
@@ -115,8 +119,10 @@ async function ensureTomorrowTournament() {
 
 async function runTournamentChecks() {
   try {
-    await ensureTomorrowTournament();
+    // Close and assign the tournament whose midnight deadline has passed
+    // before opening the next registration cycle.
     await closeExpiredTournaments();
+    await ensureTomorrowTournament();
   } catch (error) {
     console.error("Tournament check error:", error);
   }
