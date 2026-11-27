@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const { db } = require("./firebase");
 const { registerPlayerForTournament } = require("./registration");
+const { SIMULATORS } = require("./simulatorList");
 
 const TIME_ZONE = "Africa/Addis_Ababa";
 const ENTRY_FEE = 200;
@@ -154,12 +155,25 @@ async function prepareDailySchedule() {
   const simulatorSnapshot = await db.ref("simulators").once("value");
   const simulatorAccounts = simulatorSnapshot.val() || {};
 
-  const simulatorIds = Object.entries(simulatorAccounts)
-    .filter(([, account]) => isSimulatorAccount(account))
-    .map(([playerId]) => String(playerId));
+  // GitHub's master list defines the simulator identities. Firebase only
+  // confirms that each live wallet exists and has the required simulator flags.
+  const simulatorIds = SIMULATORS
+    .filter(({ id }) => isSimulatorAccount(simulatorAccounts[id]))
+    .map(({ id }) => id);
+
+  const invalidAccounts = SIMULATORS
+    .filter(({ id }) => !isSimulatorAccount(simulatorAccounts[id]))
+    .map(({ id }) => id);
+
+  if (invalidAccounts.length) {
+    console.error(
+      "Simulator accounts missing or with invalid flags (not scheduled):",
+      invalidAccounts.join(", ")
+    );
+  }
 
   if (simulatorIds.length === 0) {
-    console.log("No existing simulator accounts were found. No accounts were created or changed.");
+    console.log("No valid master-list simulator wallets were found. No accounts were created or changed.");
     return null;
   }
 
