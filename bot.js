@@ -279,7 +279,8 @@ bot.on("callback_query", async q => {
         const date = await getAddisDate();
         const snap = await db.ref("tournaments/" + date + "/playerAssignments/" + id).once("value");
         const a = snap.val();
-        const body = a ? "Today's tournament: " + date + "\nGroup: " + a.groupNumber + "\nMatch: " + a.matchId + "\nStatus: " + a.status : "No match assignment found for today yet.";
+        const stageName = a && a.roundLabel ? a.roundLabel : a ? "Group " + a.groupNumber : "";
+        const body = a ? "Today's tournament: " + date + "\nStage: " + stageName + "\nMatch: " + a.matchId + "\nStatus: " + a.status : "No match assignment found for today yet.";
         return bot.sendMessage(chatId, "🎮 MY MATCHES\n\n" + body, back());
       }
       if (action === "results") {
