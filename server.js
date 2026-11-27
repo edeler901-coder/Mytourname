@@ -1,4 +1,3 @@
-
 require("dotenv").config();
 
 const express = require("express");
@@ -8,6 +7,8 @@ const path = require("path");
 const { db } = require("./firebase");
 const { router: registrationRouter } = require("./registration");
 const { requireTelegramAuth } = require("./telegramAuth");
+
+const { createSimulators } = require("./createSimulators");
 
 const {
   startSimulatorScheduler
@@ -496,6 +497,11 @@ app.listen(PORT, async () => {
   console.log(`Bingo Champions running on port ${PORT}`);
 
   try {
+    // Create and safely fund simulator accounts before registration scheduling begins.
+    // The funding-version guard prevents repeat credits on normal server restarts.
+    const simulatorSetup = await createSimulators();
+    console.log("Simulator account setup result:", simulatorSetup);
+
     // Create tomorrow's tournament first
     await ensureTomorrowTournament();
 
@@ -503,12 +509,12 @@ app.listen(PORT, async () => {
     startTournamentSetup();
 
     // Start simulator registration scheduler
-startSimulatorScheduler();
+    startSimulatorScheduler();
 
-// Start automatic Bingo game scheduler
-startGameScheduler();
+    // Start automatic Bingo game scheduler
+    startGameScheduler();
 
-console.log("Tournament systems initialized.");
+    console.log("Tournament systems initialized.");
 
   } catch (error) {
     console.error(
