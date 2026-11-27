@@ -101,11 +101,9 @@ app.get("/api/tournament/settings", async (req, res) => {
     const simulatorPlayers = confirmedRegistrations.filter(
       registration => registration.isSimulator === true
     ).length;
-    const prizePercentage =
-      Number(PRIZE_SPLIT.first || 0) +
-      Number(PRIZE_SPLIT.second || 0) +
-      Number(PRIZE_SPLIT.third || 0);
-    const prizePool = grossContributions * prizePercentage / 100;
+    // Public prize pool displays 100% of all collected entry fees.
+    // The house commission is handled separately and is not deducted here.
+    const prizePool = grossContributions;
 
     return res.json({
       entryFee,
