@@ -100,14 +100,54 @@ if (!TOKEN || !ADMIN_ID) {
         const playerRef = db.ref("players/" + session.playerId);
         const now = Date.now();
 
-        const result = await playerRef.transaction(player => {
-          if (!player || player.phoneVerified !== true ||
-              player.phoneNumber !== session.phone) return;
-          player.transactions = player.transactions || {};
-          if (player.transactions[creditId]) return player;
+        // Prime and validate the server value before starting the transaction.
+        // RTDB may initially call a transaction updater with null when the
+        // existing value is not cached; returning undefined at that point aborts it.
+        const beforeSnapshot = await playerRef.once("value");
+        const before = beforeSnapshot.val();
 
-          const balance = Number(player.balance || 0);
-          if (!Number.isFinite(balance) || balance < 0) return;
+        if (!before || before.phoneVerified !== true || before.phoneNumber !== session.phone) {
+          sessions.delete(ADMIN_ID);
+          return bot.sendMessage(chatId, "❌ Credit stopped: the verified player record or phone number no longer matches. No balance was changed.", menu());
+        }
+
+        const beforeBalance = Number(before.balance ?? 0);
+        if (!Number.isFinite(beforeBalance) || beforeBalance < 0) {
+          sessions.delete(ADMIN_ID);
+          return bot.sendMessage(chatId, "❌ Credit stopped: this player's saved balance is invalid. No balance was changed.", menu());
+        }
+
+        let abortReason = "unknown";
+        const result = await playerRef.transaction(player => {
+          abortReason = "unknown";
+
+          if (!player) {
+            abortReason = "player_missing";
+            return;
+          }
+          if (player.phoneVerified !== true || player.phoneNumber !== session.phone) {
+            abortReason = "phone_mismatch";
+            return;
+          }
+
+          if (player.transactions == null) {
+            player.transactions = {};
+          } else if (typeof player.transactions !== "object" || Array.isArray(player.transactions)) {
+            abortReason = "invalid_transactions";
+            return;
+          }
+
+          if (player.transactions[creditId]) {
+            abortReason = "duplicate_reference";
+            return;
+          }
+
+          const balance = Number(player.balance ?? 0);
+          if (!Number.isFinite(balance) || balance < 0) {
+            abortReason = "invalid_balance";
+            return;
+          }
+
           player.balance = Math.round((balance + session.amount) * 100) / 100;
           player.transactions[creditId] = {
             type: "admin_credit",
@@ -118,13 +158,29 @@ if (!TOKEN || !ADMIN_ID) {
             createdAt: now
           };
           return player;
-        });
+        }, undefined, false);
 
-        const updated = result.snapshot.val();
+        const updated = result.snapshot && result.snapshot.val();
         const transaction = updated && updated.transactions && updated.transactions[creditId];
         if (!result.committed || !transaction || transaction.type !== "admin_credit") {
+          console.error("Admin credit not committed:", {
+            playerId: session.playerId,
+            committed: result.committed,
+            reason: abortReason
+          });
           sessions.delete(ADMIN_ID);
-          return bot.sendMessage(chatId, "❌ Credit was not completed. The player account may have changed. Please search again.", menu());
+          const reasonMessages = {
+            player_missing: "Player record was missing during the update.",
+            phone_mismatch: "The verified phone number no longer matches.",
+            invalid_transactions: "The player's transaction history has an invalid format.",
+            duplicate_reference: "This credit reference was already used.",
+            invalid_balance: "The player's saved balance is invalid."
+          };
+          return bot.sendMessage(
+            chatId,
+            "❌ Credit was not completed. " + (reasonMessages[abortReason] || "The database transaction did not commit.") + " No balance was changed.",
+            menu()
+          );
         }
 
         sessions.delete(ADMIN_ID);
