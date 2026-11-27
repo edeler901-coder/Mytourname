@@ -2328,3 +2328,9 @@ body {
 .header .wallet h2 {
   margin-top: 1px;
 }
+
+
+/* DOUBLE THE AMHARIC WALLET LABEL SIZE */
+.header .wallet p {
+  font-size: 16px;
+}
