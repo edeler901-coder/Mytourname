@@ -726,6 +726,29 @@ async function processDueRegistrations() {
     const closingAt = Number(tournament.registrationClosesAt) ||
       getAddisDayEnd(registrationDate);
 
+    const taskList = schedule.tasks || [];
+    const dueTasks = taskList.filter(task =>
+      task &&
+      Number(task.runAt) <= now &&
+      (task.status || "pending") !== "completed" &&
+      Number(task.nextAttemptAt || task.runAt || 0) <= now
+    );
+    const earliestTask = taskList
+      .filter(Boolean)
+      .sort((a, b) => Number(a.runAt || 0) - Number(b.runAt || 0))[0];
+
+    console.log("Simulator scheduler check:", {
+      tournamentDate,
+      currentAddisTime: new Date(now).toLocaleString("en-GB", { timeZone: "Africa/Addis_Ababa" }),
+      totalTasks: taskList.length,
+      dueTasks: dueTasks.length,
+      earliestRunAtAddis: earliestTask
+        ? new Date(Number(earliestTask.runAt)).toLocaleString("en-GB", { timeZone: "Africa/Addis_Ababa" })
+        : null,
+      earliestTaskStatus: earliestTask ? earliestTask.status || "pending" : null,
+      registrationClosesAtAddis: new Date(closingAt).toLocaleString("en-GB", { timeZone: "Africa/Addis_Ababa" })
+    });
+
     if (now >= closingAt) {
       await rebuildDailyReport(schedule, {
         ...tournament,
@@ -752,7 +775,10 @@ async function processDueRegistrations() {
       );
 
       const claim = await claimTask(taskRef, now);
-      if (!claim) continue;
+      if (!claim) {
+        console.log("Simulator task was not claimed:", playerId);
+        continue;
+      }
 
       const playerId = String(claim.task.playerId);
 
