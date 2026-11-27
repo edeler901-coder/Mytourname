@@ -32,6 +32,7 @@ const {
 } = require("./tournamentSetup");
 
 require("./bot");
+require("./adminBot");
 
 const {
   ENTRY_FEE,
