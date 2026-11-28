@@ -1,6 +1,7 @@
 const TelegramBot = require("node-telegram-bot-api");
 const crypto = require("crypto");
 const { db } = require("./firebase");
+const { assignTournamentPlayers } = require("./assignment");
 
 const TOKEN = process.env.ADMIN_BOT_TOKEN;
 const ADMIN_ID = process.env.ADMIN_ID ? String(process.env.ADMIN_ID) : "";
@@ -61,6 +62,54 @@ if (!TOKEN || !ADMIN_ID) {
     if (!isAdmin(msg.from.id)) return;
     sessions.delete(ADMIN_ID);
     await bot.sendMessage(msg.chat.id, "Current action cancelled.", menu());
+  });
+
+  // Secure manual recovery command, restricted to the configured Telegram admin.
+  bot.onText(/^\/assign(?:@\w+)?\s+(\d{4}-\d{2}-\d{2})$/, async msg => {
+    if (!isAdmin(msg.from.id)) return;
+
+    const tournamentDate = msg.text.match(/^\/assign(?:@\w+)?\s+(\d{4}-\d{2}-\d{2})$/)[1];
+
+    try {
+      await bot.sendMessage(msg.chat.id, "⏳ Checking registrations and assigning players for " + tournamentDate + "...");
+
+      const tournament = await assignTournamentPlayers(tournamentDate);
+
+      if (!tournament) {
+        return bot.sendMessage(msg.chat.id, "❌ Tournament record not found: " + tournamentDate);
+      }
+
+      const registrationCount = Object.values(tournament.registrations || {})
+        .filter(player => player && player.status === "registered").length;
+      const groupCount = Object.keys(tournament.groups || {}).length;
+      const assignedCount = Object.keys(tournament.playerAssignments || {}).length;
+
+      if (tournament.assignmentsCreatedAt && groupCount === 32) {
+        return bot.sendMessage(
+          msg.chat.id,
+          "✅ ASSIGNMENT COMPLETED\n\nTournament: " + tournamentDate +
+          "\nRegistered players: " + registrationCount +
+          "\nAssigned players: " + assignedCount +
+          "\nGroups created: " + groupCount
+        );
+      }
+
+      return bot.sendMessage(
+        msg.chat.id,
+        "⚠️ ASSIGNMENT NOT COMPLETED\n\nTournament: " + tournamentDate +
+        "\nRegistered players: " + registrationCount +
+        "\nGroups created: " + groupCount +
+        "\nAssignment attempted: " + Boolean(tournament.assignmentAttemptedAt) +
+        "\nStatus: " + String(tournament.status || "unknown") +
+        "\nReason: " + String(tournament.assignmentError || "No assignment error was saved. Check Render logs.")
+      );
+    } catch (error) {
+      console.error("Manual tournament assignment failed:", tournamentDate, error);
+      return bot.sendMessage(
+        msg.chat.id,
+        "❌ ASSIGNMENT ERROR for " + tournamentDate + "\n" + String(error.message || error)
+      );
+    }
   });
 
   bot.on("callback_query", async query => {
