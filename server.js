@@ -624,33 +624,37 @@ app.post(["/api/sms/incoming", "/api/sms/incoming/:secret"], async (req, res) =>
 });
 
 // Start server
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`Bingo Champions running on port ${PORT}`);
 
+  // Start tournament assignment immediately and independently.
+  // Simulator setup must never prevent overdue player distribution.
   try {
-    // Create and safely fund simulator accounts before registration scheduling begins.
-    // The funding-version guard prevents repeat credits on normal server restarts.
-    const simulatorSetup = await createSimulators();
-    console.log("Simulator account setup result:", simulatorSetup);
-
-    // Create tomorrow's tournament first
-    await ensureTomorrowTournament();
-
-    // Start automatic daily tournament setup
     startTournamentSetup();
-
-    // Start simulator registration scheduler
-    startSimulatorScheduler();
-
-    // Start automatic Bingo game scheduler
-    startGameScheduler();
-
-    console.log("Tournament systems initialized.");
-
+    console.log("Tournament assignment scheduler started.");
   } catch (error) {
-    console.error(
-      "Tournament initialization failed:",
-      error
-    );
+    console.error("Tournament assignment scheduler failed to start:", error);
+  }
+
+  // Keep simulator setup isolated from tournament assignment.
+  (async () => {
+    try {
+      // Create and safely fund simulator accounts before simulator registration.
+      const simulatorSetup = await createSimulators();
+      console.log("Simulator account setup result:", simulatorSetup);
+
+      startSimulatorScheduler();
+      console.log("Simulator registration scheduler started.");
+    } catch (error) {
+      console.error("Simulator initialization failed:", error);
+    }
+  })();
+
+  // Game scheduling is also independent of simulator initialization.
+  try {
+    startGameScheduler();
+    console.log("Bingo game scheduler started.");
+  } catch (error) {
+    console.error("Bingo game scheduler failed to start:", error);
   }
 });
