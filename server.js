@@ -27,8 +27,7 @@ const {
 } = require("./gameEngine");
 
 const {
-  startTournamentSetup,
-  ensureTomorrowTournament
+  startTournamentSetup
 } = require("./tournamentSetup");
 
 require("./bot");
