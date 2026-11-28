@@ -1,4 +1,3 @@
-
 const crypto = require("crypto");
 const { db } = require("./firebase");
 
@@ -10,24 +9,27 @@ const {
 const MIN_PLAYERS = 32;
 const MAX_PLAYERS = 320;
 
-// Assign players after registration closes
+// Assign a tournament once its registration deadline has passed.
+// This also recovers tournaments missed by an earlier scheduler run.
 async function assignTournamentPlayers(tournamentDate) {
   const tournamentRef = db.ref(`tournaments/${tournamentDate}`);
 
   const result = await tournamentRef.transaction((current) => {
     if (!current) return;
 
-    // Never assign the same tournament twice
-    if (current.assignmentsCreatedAt) return current;
-
-    if (current.registrationOpen !== true) return current;
-
-    if (Date.now() < Number(current.registrationClosesAt)) {
+    // A completed or already-attempted tournament must never be assigned twice.
+    if (current.assignmentsCreatedAt || current.assignmentAttemptedAt) {
       return current;
     }
 
-    const registrations = current.registrations || {};
+    const closesAt = Number(current.registrationClosesAt);
+    if (!Number.isFinite(closesAt) || Date.now() < closesAt) {
+      return current;
+    }
 
+    if (current.status === "cancelled") return current;
+
+    const registrations = current.registrations || {};
     const players = Object.entries(registrations)
       .filter(([id, registration]) =>
         registration &&
@@ -42,15 +44,15 @@ async function assignTournamentPlayers(tournamentDate) {
       }));
 
     const updated = JSON.parse(JSON.stringify(current));
-
     updated.registrationOpen = false;
-    updated.registrationClosedAt = Date.now();
+    updated.registrationClosedAt = updated.registrationClosedAt || Date.now();
+    updated.assignmentAttemptedAt = Date.now();
+    updated.assignmentPlayerCount = players.length;
 
     if (players.length < MIN_PLAYERS) {
       updated.status = "insufficient_players";
       updated.assignmentError =
         `Only ${players.length} players registered. At least ${MIN_PLAYERS} are required.`;
-
       return updated;
     }
 
@@ -58,12 +60,10 @@ async function assignTournamentPlayers(tournamentDate) {
       updated.status = "capacity_exceeded";
       updated.assignmentError =
         `There are ${players.length} registrations. Maximum capacity is ${MAX_PLAYERS}.`;
-
       return updated;
     }
 
     const groups = createGroups(players);
-
     const schedule = createGroupSchedule(
       new Date(Number(current.startsAt))
     );
@@ -101,6 +101,7 @@ async function assignTournamentPlayers(tournamentDate) {
     updated.totalGroups = groups.length;
     updated.assignmentsCreatedAt = Date.now();
     updated.status = "assigned";
+    delete updated.assignmentError;
 
     return updated;
   });
@@ -109,35 +110,43 @@ async function assignTournamentPlayers(tournamentDate) {
 
   if (tournament?.assignmentsCreatedAt) {
     console.log(
-      `Assignments completed for ${tournamentDate}: ${tournament.totalPlayers} players.`
+      `Assignments completed for ${tournamentDate}: ${tournament.totalPlayers} players in ${tournament.totalGroups} groups.`
     );
-  } else if (tournament?.status === "insufficient_players") {
-    console.log(tournament.assignmentError);
-  } else if (tournament?.status === "capacity_exceeded") {
+  } else if (tournament?.assignmentError) {
     console.log(tournament.assignmentError);
   }
 
   return tournament;
 }
 
-// Find tournaments whose registration deadline has passed
+// Check every tournament record, not only records whose registrationOpen
+// flag is true. This makes overdue assignments recoverable after restarts
+// or a missed/incorrect registration flag.
 async function closeExpiredTournaments() {
   const snapshot = await db.ref("tournaments").once("value");
-
   if (!snapshot.exists()) return;
 
-  const tournaments = snapshot.val();
+  const tournaments = snapshot.val() || {};
   const now = Date.now();
 
-  for (const tournamentDate of Object.keys(tournaments)) {
-    const tournament = tournaments[tournamentDate];
+  for (const [tournamentDate, tournament] of Object.entries(tournaments)) {
+    if (!tournament ||
+        tournament.assignmentsCreatedAt ||
+        tournament.assignmentAttemptedAt ||
+        tournament.status === "cancelled") {
+      continue;
+    }
 
-    if (
-      tournament &&
-      tournament.registrationOpen === true &&
-      Number(tournament.registrationClosesAt) <= now
-    ) {
-      await assignTournamentPlayers(tournamentDate);
+    const closesAt = Number(tournament.registrationClosesAt);
+    if (Number.isFinite(closesAt) && closesAt <= now) {
+      try {
+        await assignTournamentPlayers(tournamentDate);
+      } catch (error) {
+        console.error(
+          `Assignment failed for ${tournamentDate}:`,
+          error
+        );
+      }
     }
   }
 }
