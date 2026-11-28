@@ -9,6 +9,7 @@ const ENTRY_FEE = 200;
 const CHECK_INTERVAL = 60000;
 
 let setupStarted = false;
+let checkRunning = false;
 
 function getAddisDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -19,60 +20,35 @@ function getAddisDate() {
   }).formatToParts(new Date());
 
   const values = {};
-
-  for (const part of parts) {
-    values[part.type] = part.value;
-  }
+  for (const part of parts) values[part.type] = part.value;
 
   return `${values.year}-${values.month}-${values.day}`;
 }
 
 function addisTimestamp(date, hour, minute) {
   const [year, month, day] = date.split("-").map(Number);
-
-  return Date.UTC(
-    year,
-    month - 1,
-    day,
-    hour - 3,
-    minute
-  );
+  return Date.UTC(year, month - 1, day, hour - 3, minute);
 }
 
 function getTomorrowDate() {
-  const [year, month, day] = getAddisDate()
-    .split("-")
-    .map(Number);
-
-  return new Date(
-    Date.UTC(year, month - 1, day + 1)
-  ).toISOString().slice(0, 10);
+  const [year, month, day] = getAddisDate().split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1))
+    .toISOString().slice(0, 10);
 }
 
 async function ensureTomorrowTournament() {
   const tournamentDate = getTomorrowDate();
   const registrationDate = getAddisDate();
+  const tournamentRef = db.ref(`tournaments/${tournamentDate}`);
 
-  const tournamentRef = db.ref(
-    `tournaments/${tournamentDate}`
-  );
-
-  const tournament = {
+  const newTournament = {
     id: tournamentDate,
     tournamentDate,
     entryFee: ENTRY_FEE,
     registrationOpen: true,
     registrationDate,
-    registrationClosesAt: addisTimestamp(
-      registrationDate,
-      24,
-      0
-    ),
-    startsAt: addisTimestamp(
-      tournamentDate,
-      16,
-      30
-    ),
+    registrationClosesAt: addisTimestamp(registrationDate, 24, 0),
+    startsAt: addisTimestamp(tournamentDate, 16, 30),
     status: "scheduled",
     createdAt: Date.now()
   };
@@ -80,45 +56,41 @@ async function ensureTomorrowTournament() {
   let created = false;
 
   const result = await tournamentRef.transaction(current => {
-    if (!current) {
-      created = true;
-      return tournament;
+    if (current) {
+      // Never reopen a closed/assigned tournament or overwrite its registrations.
+      created = false;
+      return current;
     }
 
-    created = false;
-
-    // Reopen registration on the existing record without replacing
-    // its registrations, payments, tournament settings, or other data.
-    return {
-      ...current,
-      // Keep the existing tournament's entry fee aligned with the
-      // configured fee used by human and simulator registration.
-      entryFee: ENTRY_FEE,
-      registrationOpen: true,
-      registrationDate,
-      registrationClosesAt: tournament.registrationClosesAt
-    };
+    created = true;
+    return newTournament;
   });
 
   if (!result.committed) {
-    throw new Error("Unable to create or update the tournament record.");
+    throw new Error("Unable to create or confirm tomorrow's tournament.");
   }
 
   console.log(
     created
       ? `Tournament record created: ${tournamentDate}`
-      : `Tournament registration confirmed open: ${tournamentDate}`
+      : `Existing tournament preserved: ${tournamentDate}`
   );
 
   return result.snapshot.val();
 }
 
 async function runTournamentChecks() {
+  if (checkRunning) return;
+  checkRunning = true;
+
   try {
+    // Create tomorrow's registration record, then process every overdue date.
     await ensureTomorrowTournament();
     await closeExpiredTournaments();
   } catch (error) {
     console.error("Tournament check error:", error);
+  } finally {
+    checkRunning = false;
   }
 }
 
@@ -126,14 +98,10 @@ function startTournamentSetup() {
   if (setupStarted) return;
 
   setupStarted = true;
-
-  console.log("Daily tournament setup started.");
+  console.log("Automatic daily tournament assignment started.");
 
   runTournamentChecks();
-
-  setInterval(() => {
-    runTournamentChecks();
-  }, CHECK_INTERVAL);
+  setInterval(runTournamentChecks, CHECK_INTERVAL);
 }
 
 module.exports = {
