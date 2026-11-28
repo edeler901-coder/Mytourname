@@ -49,7 +49,8 @@ if (!TOKEN || !ADMIN_ID) {
   bot.setMyCommands([
     { command: "start", description: "Open admin menu" },
     { command: "menu", description: "Open admin menu" },
-    { command: "cancel", description: "Cancel current action" }
+    { command: "cancel", description: "Cancel current action" },
+    { command: "assign", description: "Assign registered tournament players (admin only)" }
   ]).catch(error => console.error("Admin bot commands setup failed:", error.message));
 
   bot.onText(/^\/(start|menu)(?:@\w+)?$/, async msg => {
