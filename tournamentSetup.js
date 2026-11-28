@@ -84,11 +84,19 @@ async function runTournamentChecks() {
   checkRunning = true;
 
   try {
-    // Create tomorrow's registration record, then process every overdue date.
-    await ensureTomorrowTournament();
-    await closeExpiredTournaments();
-  } catch (error) {
-    console.error("Tournament check error:", error);
+    // Creating tomorrow's registration must not block overdue assignments.
+    try {
+      await ensureTomorrowTournament();
+    } catch (error) {
+      console.error("Tomorrow tournament setup failed:", error);
+    }
+
+    // Always scan overdue tournament dates, even if tomorrow's setup failed.
+    try {
+      await closeExpiredTournaments();
+    } catch (error) {
+      console.error("Overdue tournament assignment scan failed:", error);
+    }
   } finally {
     checkRunning = false;
   }
